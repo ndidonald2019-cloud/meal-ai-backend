@@ -1,371 +1,265 @@
-const express = require("express")
-const axios = require("axios")
-const cors = require("cors")
-const rateLimit = require("express-rate-limit")
-require("dotenv").config()
+const express = require("express");
+const axios = require("axios");
+const rateLimit = require("express-rate-limit");
+require('dotenv').config();
 
-const app = express()
-const PORT = process.env.PORT || 3000
+const app = express();
+app.use(express.json());
 
-// Middleware
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'https://nutriverse-cuisine.lovable.app',
-    'https://cookandeathealthy.com',
-    'https://www.cookandeathealthy.com',
-    'https://cookandeathealthy.netlify.app'
-  ]
-}))
-app.use(express.json())
+// 🔐 Simple in-memory users (MVP)
+const users = {
+  "test-user": { credits: 100 }
+};
 
-// Rate limiting
+// 💰 Credit costs
+const CREDIT_COSTS = {
+  cookWithIngredients: 5,
+  generateWeeklyPlan: 15,
+  rescueLeftovers: 3,
+  getCookingSteps: 5,
+  budgetMeals: 5
+};
+
+// 🧠 Credit checker
+function checkAndDeductCredits(userId, cost) {
+  const user = users[userId];
+
+  if (!user) return { error: "User not found" };
+  if (user.credits < cost) return { error: "Not enough credits" };
+
+  user.credits -= cost;
+  return { success: true, remaining: user.credits };
+}
+
+// 🚫 Rate limiter
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: { error: "Too many requests. Try again later." }
-})
-app.use(limiter)
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: "Too many requests, slow down." }
+});
 
-// Health check (always add this)
-app.get("/", (req, res) => {
-  res.json({ 
-    status: "NutriVerse API is running",
-    endpoints: [
-      "GET /searchVideos?meal=jollof rice",
-      "POST /extractRecipe",
-      "POST /getNutrition",
-      "GET /getMealImage?meal=jollof rice"
-    ]
-  })
-})
+app.use(limiter);
 
-// ✅ ENDPOINT 1 — YouTube Search
-app.get("/searchVideos", async (req, res) => {
-  const meal = req.query.meal
-  if (!meal) {
-    return res.status(400).json({ error: 'meal parameter is required' })
+// ═══════════════════════════════════════════
+// ENDPOINT 1 — What Can I Cook With This
+// ═══════════════════════════════════════════
+app.post("/cookWithIngredients", async (req, res) => {
+
+  const userId = req.headers["userid"];
+  if (!userId) return res.status(401).json({ error: "User ID required" });
+
+  const creditCheck = checkAndDeductCredits(userId, CREDIT_COSTS.cookWithIngredients);
+  if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
+
+  const { ingredients, pantryItems, maxMissing, country } = req.body
+
+  if (!Array.isArray(ingredients) || ingredients.length === 0) {
+    return res.status(400).json({ error: 'ingredients list is required' })
   }
 
   try {
-    const response = await axios.get(
-      "https://www.googleapis.com/youtube/v3/search",
-      {
-        params: {
-          part: "snippet",
-          q: `how to cook ${meal} recipe`,
-          maxResults: 20,
-          type: "video",
-          videoEmbeddable: "true",    // ✅ Fixed: string not boolean
-          videoSyndicated: "true",    // ✅ Fixed: string not boolean
-          key: process.env.YOUTUBE_API_KEY,
-        },
-      }
-    )
-
-    const videos = response.data.items
-      .filter(item => item.id?.videoId)
-      .slice(0, 15)
-      .map(item => ({
-        videoId: item.id.videoId,
-        title: item.snippet.title,
-        thumbnail: item.snippet.thumbnails.medium.url,
-        channel: item.snippet.channelTitle,
-        embedUrl: `https://www.youtube.com/embed/${item.id.videoId}`
-      }))
-
-    res.json({ success: true, count: videos.length, videos })
-
-  } catch (error) {
-    console.error('YouTube error:', error.message)
-    
-    // Handle quota exceeded specifically
-    if (error.response?.status === 403) {
-      return res.status(403).json({ 
-        error: 'YouTube API quota exceeded',
-        message: 'Daily limit reached. Try again tomorrow.'
-      })
-    }
-    
-    res.status(500).json({ 
-      error: 'Failed to fetch videos',
-      message: error.message 
-    })
-  }
-})
-
-// ✅ ENDPOINT 2 — AI Recipe Extraction
-app.post("/extractRecipe", async (req, res) => {
-  const { mealName, videoTitle } = req.body
-  if (!mealName) {
-    return res.status(400).json({ error: 'mealName is required' })
-  }
-
-  try {
-    const prompt = `
-      You are a culinary expert specializing in global cuisines 
-      especially African, Asian and local dishes.
-      
-      Generate a detailed recipe for: "${mealName}"
-      ${videoTitle ? `Related video: "${videoTitle}"` : ''}
-      
-      Return ONLY valid JSON, no markdown, no extra text:
-      {
-        "meal_name": "<name>",
-        "description": "<2 sentences about this dish>",
-        "cooking_time": "<total time>",
-        "prep_time": "<preparation time>",
-        "servings": <number>,
-        "difficulty": "Beginner|Intermediate|Advanced",
-        "ingredients": [
-          {
-            "name": "<English ingredient name>",
-            "local_name": "<local language name if African dish>",
-            "quantity": "<amount and unit>",
-            "notes": "<substitution or tip>"
-          }
-        ],
-        "steps": [
-          {
-            "number": 1,
-            "title": "<short step title>",
-            "instruction": "<detailed instruction>",
-            "duration": "<time for this step>"
-          }
-        ],
-        "tips": [
-          "<practical cooking tip>",
-          "<serving or cultural tip>"
-        ],
-        "nutrition_per_serving": {
-          "calories": <number>,
-          "protein": "<Xg>",
-          "carbs": "<Xg>",
-          "fat": "<Xg>",
-          "fiber": "<Xg>"
-        }
-      }
-    `
+    const prompt = `You are a culinary expert. Based on the following ingredients: ${ingredients.join(', ')}, and pantry items: ${pantryItems ? pantryItems.join(', ') : 'none'}, suggest 3-5 meal ideas that can be made with these ingredients, allowing up to ${maxMissing || 3} missing ingredients that can be easily obtained. Consider ${country || 'general'} cuisine preferences. For each meal, provide: name, description, list of ingredients used, missing ingredients, and approximate nutritional information per serving (calories, protein, carbs, fat). Return the response as a valid JSON object with a key "meals" containing an array of meal objects.`;
 
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048  // ✅ Increased for full recipes
-        }
+        generationConfig: { temperature: 0.8, maxOutputTokens: 2048 }
       }
     )
 
-    const rawText = response.data
-      ?.candidates?.[0]
-      ?.content?.parts?.[0]?.text
+    const rawText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text
 
-    if (!rawText) {
-      return res.status(500).json({ error: 'Empty response from AI' })
-    }
-
-    const cleanText = rawText
-      .replace(/```json/g, '')
-      .replace(/```/g, '')
-      .trim()
-
-    let recipe
+    let result;
     try {
-      recipe = JSON.parse(cleanText)
+      const cleanText = rawText?.replace(/```json/g, '').replace(/```/g, '').trim();
+      result = JSON.parse(cleanText);
     } catch (err) {
-      console.error("JSON parse error:", cleanText)
-      return res.status(500).json({
-        error: "AI returned invalid format. Try again.",
-      })
+      return res.status(500).json({ error: 'AI returned invalid format. Try again.' });
     }
 
-    res.json({ success: true, recipe })
+    res.json({ success: true, ...result, remainingCredits: users[userId].credits })
 
   } catch (error) {
-    console.error('Gemini recipe error:', error.message)
-    res.status(500).json({ error: 'Failed to extract recipe' })
+    res.status(500).json({ error: 'Failed to get meal suggestions' })
   }
 })
 
-// ✅ ENDPOINT 3 — Nutrition Guidance
-app.post("/getNutrition", async (req, res) => {
+// ═══════════════════════════════════════════
+// ENDPOINT 2 — Generate Weekly Meal Plan
+// ═══════════════════════════════════════════
+app.post("/generateWeeklyPlan", async (req, res) => {
+
+  const userId = req.headers["userid"];
+  if (!userId) return res.status(401).json({ error: "User ID required" });
+
+  const creditCheck = checkAndDeductCredits(userId, CREDIT_COSTS.generateWeeklyPlan);
+  if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
+
   const { goal } = req.body
-  if (!goal) {
-    return res.status(400).json({ error: 'goal is required' })
-  }
 
-  // Validate goal value
-  const validGoals = ['weight gain', 'weight loss', 'maintenance']
-  if (!validGoals.some(g => goal.toLowerCase().includes(g))) {
-    return res.status(400).json({ 
-      error: 'goal must be weight gain, weight loss, or maintenance' 
-    })
-  }
+  if (!goal) return res.status(400).json({ error: 'goal is required' })
 
   try {
-    const prompt = `
-      You are a professional nutritionist and dietitian.
-      User goal: "${goal}"
-      
-      Give practical, easy to follow nutrition advice.
-      Focus on real foods people can find in local markets.
-      Include both Western and African food options where relevant.
-      
-      Return ONLY valid JSON, no extra text:
-      {
-        "goal": "${goal}",
-        "summary": "<one motivational sentence>",
-        "daily_calorie_target": "<e.g. 2500 calories for gain>",
-        "foods_to_eat_more": [
-          {
-            "food": "<food name>",
-            "reason": "<why it helps this goal>",
-            "serving": "<recommended daily amount>",
-            "local_alternative": "<African or local equivalent>"
-          }
-        ],
-        "foods_to_reduce": [
-          {
-            "food": "<food name>",
-            "reason": "<why to reduce>",
-            "alternative": "<healthier swap>"
-          }
-        ],
-        "meal_timing": {
-          "breakfast": "<advice>",
-          "lunch": "<advice>",
-          "dinner": "<advice>",
-          "snacks": "<advice>"
-        },
-        "cooking_tips": [
-          "<tip 1>",
-          "<tip 2>",
-          "<tip 3>"
-        ],
-        "simple_meal_ideas": [
-          {
-            "meal": "<meal name>",
-            "why": "<why it fits the goal>",
-            "when": "<best time to eat it>"
-          }
-        ],
-        "habits_to_build": [
-          "<daily habit 1>",
-          "<daily habit 2>",
-          "<daily habit 3>"
-        ]
-      }
-    `
+    const prompt = `You are a nutritionist and meal planner. Create a 7-day meal plan based on the goal: ${goal}. Include breakfast, lunch, dinner, and snacks for each day. Each meal should have a name, brief description, and key ingredients. Make it balanced, healthy, and varied. Return as JSON with key "plan" as an object with days Monday-Sunday, each day having breakfast, lunch, dinner, snacks.`;
 
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1500
-        }
+        generationConfig: { temperature: 0.7, maxOutputTokens: 4096 }
       }
     )
 
-    const rawText = response.data
-      ?.candidates?.[0]
-      ?.content?.parts?.[0]?.text
+    const rawText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text
 
-    if (!rawText) {
-      return res.status(500).json({ error: 'Empty response from AI' })
-    }
-
-    const cleanText = rawText
-      .replace(/```json/g, '')
-      .replace(/```/g, '')
-      .trim()
-
-    let nutrition
+    let plan;
     try {
-      nutrition = JSON.parse(cleanText)
+      const cleanText = rawText?.replace(/```json/g, '').replace(/```/g, '').trim();
+      plan = JSON.parse(cleanText);
     } catch (err) {
-      return res.status(500).json({
-        error: "AI returned invalid format. Try again.",
-      })
+      return res.status(500).json({ error: 'AI returned invalid format. Try again.' });
     }
 
-    res.json({ success: true, nutrition })
+    res.json({ success: true, plan, remainingCredits: users[userId].credits })
 
   } catch (error) {
-    console.error('Nutrition error:', error.message)
-    res.status(500).json({ error: 'Failed to get nutrition advice' })
+    res.status(500).json({ error: 'Failed to generate meal plan' })
   }
 })
 
-// ✅ ENDPOINT 4 — Meal Image
-app.get("/getMealImage", async (req, res) => {
-  const meal = req.query.meal
-  if (!meal) {
-    return res.status(400).json({ error: 'meal parameter is required' })
-  }
+// ═══════════════════════════════════════════
+// ENDPOINT 3 — Leftover Rescue
+// ═══════════════════════════════════════════
+app.post("/rescueLeftovers", async (req, res) => {
 
-  const FALLBACK_IMAGE = {
-    url: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&q=80',
-    photographer: 'Unsplash',
-    alt: meal
+  const userId = req.headers["userid"];
+  if (!userId) return res.status(401).json({ error: "User ID required" });
+
+  const creditCheck = checkAndDeductCredits(userId, CREDIT_COSTS.rescueLeftovers);
+  if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
+
+  const { leftovers } = req.body
+
+  if (!Array.isArray(leftovers) || leftovers.length === 0) {
+    return res.status(400).json({ error: 'leftovers list is required' })
   }
 
   try {
-    const response = await axios.get(
-      "https://api.pexels.com/v1/search",
+    const prompt = `You are a creative chef. Given these leftover ingredients: ${leftovers.join(', ')}, suggest 3-5 ways to use them up in new meals or recipes. For each suggestion, provide: name, description, additional ingredients needed (if any), and step-by-step instructions. Focus on reducing waste and making delicious food. Return as JSON with key "ideas" as array of objects.`;
+
+    const response = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
-        headers: {
-          Authorization: process.env.PEXELS_API_KEY
-        },
-        params: {
-          query: meal + ' food dish cooking',
-          per_page: 5,
-          orientation: 'landscape'
-        }
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.9, maxOutputTokens: 2048 }
       }
     )
 
-    const photos = response.data.photos.map(p => ({
-      url: p.src.large,
-      thumbnail: p.src.medium,
-      photographer: p.photographer,
-      alt: p.alt || meal
-    }))
+    const rawText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text
 
-    if (photos.length === 0) {
-      return res.json({
-        success: true,
-        image: FALLBACK_IMAGE
-      })
+    let result;
+    try {
+      const cleanText = rawText?.replace(/```json/g, '').replace(/```/g, '').trim();
+      result = JSON.parse(cleanText);
+    } catch (err) {
+      return res.status(500).json({ error: 'AI returned invalid format. Try again.' });
     }
 
-    res.json({ 
-      success: true, 
-      image: photos[0],
-      all: photos
-    })
+    res.json({ success: true, ...result, remainingCredits: users[userId].credits })
 
   } catch (error) {
-    console.error('Pexels error:', error.message)
-    // Return fallback instead of error
-    res.json({ 
-      success: true, 
-      image: FALLBACK_IMAGE,
-      note: 'Using fallback image'
-    })
+    res.status(500).json({ error: 'Failed to get rescue ideas' })
   }
 })
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`✅ NutriVerse API running on http://localhost:${PORT}`)
-  console.log(`📋 Endpoints ready:`)
-  console.log(`   GET  /searchVideos?meal=jollof+rice`)
-  console.log(`   POST /extractRecipe`)
-  console.log(`   POST /getNutrition`)
-  console.log(`   GET  /getMealImage?meal=jollof+rice`)
+// ═══════════════════════════════════════════
+// ENDPOINT 4 — Cooking Steps
+// ═══════════════════════════════════════════
+app.post("/getCookingSteps", async (req, res) => {
+
+  const userId = req.headers["userid"];
+  if (!userId) return res.status(401).json({ error: "User ID required" });
+
+  const creditCheck = checkAndDeductCredits(userId, CREDIT_COSTS.getCookingSteps);
+  if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
+
+  const { mealName } = req.body
+
+  if (!mealName) return res.status(400).json({ error: 'mealName is required' })
+
+  try {
+    const prompt = `You are a cooking instructor. Provide detailed step-by-step cooking instructions for making ${mealName}. Include preparation time, cooking time, servings, ingredients list with quantities, and numbered steps. Make it clear and easy to follow. Return as JSON with keys: prepTime, cookTime, servings, ingredients (array), steps (array).`;
+
+    const response = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.6, maxOutputTokens: 2048 }
+      }
+    )
+
+    const rawText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text
+
+    let result;
+    try {
+      const cleanText = rawText?.replace(/```json/g, '').replace(/```/g, '').trim();
+      result = JSON.parse(cleanText);
+    } catch (err) {
+      return res.status(500).json({ error: 'AI returned invalid format. Try again.' });
+    }
+
+    res.json({ success: true, ...result, remainingCredits: users[userId].credits })
+
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get cooking steps' })
+  }
 })
+
+// ═══════════════════════════════════════════
+// ENDPOINT 5 — Budget Meals
+// ═══════════════════════════════════════════
+app.post("/budgetMeals", async (req, res) => {
+
+  const userId = req.headers["userid"];
+  if (!userId) return res.status(401).json({ error: "User ID required" });
+
+  const creditCheck = checkAndDeductCredits(userId, CREDIT_COSTS.budgetMeals);
+  if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
+
+  const { budget } = req.body
+
+  if (!budget) return res.status(400).json({ error: 'budget is required' })
+
+  try {
+    const prompt = `You are a budget cooking expert. Suggest 5 affordable meal ideas that can be made for under $${budget} per serving. Each meal should be nutritious, tasty, and use common ingredients. Provide: name, estimated cost per serving, ingredients with quantities, brief instructions, and nutritional highlights. Return as JSON with key "meals" as array.`;
+
+    const response = await axios.post(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+      }
+    )
+
+    const rawText = response.data?.candidates?.[0]?.content?.parts?.[0]?.text
+
+    let result;
+    try {
+      const cleanText = rawText?.replace(/```json/g, '').replace(/```/g, '').trim();
+      result = JSON.parse(cleanText);
+    } catch (err) {
+      return res.status(500).json({ error: 'AI returned invalid format. Try again.' });
+    }
+
+    res.json({ success: true, ...result, remainingCredits: users[userId].credits })
+
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get budget meals' })
+  }
+})
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
