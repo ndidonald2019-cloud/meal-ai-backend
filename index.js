@@ -114,7 +114,7 @@ app.get("/getMealImage", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════
-// 🍳 COOK WITH INGREDIENTS
+// 🍳 COOK WITH INGREDIENTS (OpenAI Version)
 // ═══════════════════════════════════════════
 app.post("/cookWithIngredients", async (req, res) => {
   const userId = req.headers["userid"];
@@ -136,12 +136,20 @@ app.post("/cookWithIngredients", async (req, res) => {
     }`;
 
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      { contents: [{ parts: [{ text: prompt }] }] },
-      { headers: { 'Content-Type': 'application/json' } }
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+        }
+      }
     );
 
-    const text = response.data.candidates[0].content.parts[0].text;
+    const text = response.data.choices[0].message.content;
     
     // Bulletproof JSON extractor
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -159,7 +167,7 @@ app.post("/cookWithIngredients", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════
-// 🧠 WEEKLY PLAN
+// 🧠 WEEKLY PLAN (OpenAI Version)
 // ═══════════════════════════════════════════
 app.post("/generateWeeklyPlan", async (req, res) => {
   const userId = req.headers["userid"];
@@ -177,12 +185,20 @@ app.post("/generateWeeklyPlan", async (req, res) => {
     }`;
 
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      { contents: [{ parts: [{ text: prompt }] }] },
-      { headers: { 'Content-Type': 'application/json' } }
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+        }
+      }
     );
 
-    const text = response.data.candidates[0].content.parts[0].text;
+    const text = response.data.choices[0].message.content;
     
     // Bulletproof JSON extractor
     const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -203,7 +219,7 @@ app.post("/generateWeeklyPlan", async (req, res) => {
 // 🚀 START SERVER
 // ═══════════════════════════════════════════
 app.get("/", (req, res) => {
-  res.send("🚀 Nutriverse API is running");
+  res.send("🚀 Nutriverse API is running (OpenAI)");
 });
 
 app.listen(PORT, () => {
