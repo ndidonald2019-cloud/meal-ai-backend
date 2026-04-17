@@ -303,7 +303,7 @@ Return ONLY this exact JSON structure with no extra text:
 })
 
 
-// ═══════════════════════════════════════════
+// // ═══════════════════════════════════════════
 // ✅ FIXED — Cook With Ingredients
 // ═══════════════════════════════════════════
 app.post("/cookWithIngredients", async (req, res) => {
@@ -594,7 +594,8 @@ Return ONLY this exact JSON with no extra text:
     console.log('Goal:', goal, '| Country:', country)
 
     const response = await axios.post(
-      https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
           temperature: 0.7,
