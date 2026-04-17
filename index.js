@@ -113,33 +113,43 @@ app.get("/getMealImage", async (req, res) => {
   }
 });
 
-// ═══════════════════════════════════════════
+//// ═══════════════════════════════════════════
 // 🍳 COOK WITH INGREDIENTS
 // ═══════════════════════════════════════════
 app.post("/cookWithIngredients", async (req, res) => {
-
   const userId = req.headers["userid"];
   if (!userId) return res.status(401).json({ error: "User ID required" });
 
   const creditCheck = checkAndDeductCredits(userId, CREDIT_COSTS.cookWithIngredients);
   if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
 
-  const { ingredients } = req.body;
+  const { ingredients, country } = req.body;
   if (!ingredients) return res.status(400).json({ error: 'ingredients required' });
 
   try {
-    const prompt = `Suggest meals using: ${ingredients.join(', ')}`;
+    const prompt = `You are a professional chef. Suggest 3 meals using these ingredients: ${ingredients.join(', ')}. The style should match ${country || 'global'} cuisine. 
+    Return ONLY a valid JSON object in this exact format, with no markdown formatting or backticks:
+    {
+      "recipes": [
+        { "title": "Recipe Name", "description": "Brief description", "matchPercentage": 90, "missedIngredients": ["salt"] }
+      ]
+    }`;
 
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        contents: [{ parts: [{ text: prompt }] }]
-      }
+      { contents: [{ parts: [{ text: prompt }] }] },
+      { headers: { 'Content-Type': 'application/json' } }
     );
 
-    res.json({ success: true, data: response.data, remainingCredits: users[userId].credits });
+    const text = response.data.candidates[0].content.parts[0].text;
+    // Clean up potential markdown formatting from Gemini
+    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsedData = JSON.parse(cleanJson);
 
-  } catch {
+    res.json({ success: true, recipes: parsedData.recipes, remainingCredits: users[userId].credits });
+
+  } catch (error) {
+    console.error(error.response?.data || error);
     res.status(500).json({ error: 'AI failed' });
   }
 });
@@ -148,20 +158,35 @@ app.post("/cookWithIngredients", async (req, res) => {
 // 🧠 WEEKLY PLAN
 // ═══════════════════════════════════════════
 app.post("/generateWeeklyPlan", async (req, res) => {
-
   const userId = req.headers["userid"];
   const creditCheck = checkAndDeductCredits(userId, CREDIT_COSTS.generateWeeklyPlan);
   if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
 
   try {
+    const prompt = `Generate a 7-day healthy meal plan. 
+    Return ONLY a valid JSON object in this exact format, with no markdown formatting or backticks:
+    {
+      "plan": {
+        "Monday": { "breakfast": "Oats", "lunch": "Salad", "dinner": "Chicken" },
+        "Tuesday": { "breakfast": "Eggs", "lunch": "Wrap", "dinner": "Fish" }
+        // ... (include all 7 days)
+      }
+    }`;
+
     const response = await axios.post(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      { contents: [{ parts: [{ text: "Generate weekly meal plan" }] }] }
+      { contents: [{ parts: [{ text: prompt }] }] },
+      { headers: { 'Content-Type': 'application/json' } }
     );
 
-    res.json({ success: true, data: response.data });
+    const text = response.data.candidates[0].content.parts[0].text;
+    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsedData = JSON.parse(cleanJson);
 
-  } catch {
+    res.json({ success: true, plan: parsedData.plan, remainingCredits: users[userId].credits });
+
+  } catch (error) {
+    console.error(error.response?.data || error);
     res.status(500).json({ error: 'AI failed' });
   }
 });
