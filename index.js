@@ -180,7 +180,7 @@ Return ONLY this exact JSON structure with no extra text:
     console.log('Ingredients:', ingredientsList)
 
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`
       {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
@@ -404,7 +404,7 @@ Return ONLY this exact JSON with no extra text:
     console.log('Goal:', goal, '| Country:', country)
 
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`
       {
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
