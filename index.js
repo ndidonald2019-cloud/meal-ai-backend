@@ -25,7 +25,6 @@ const CREDIT_COSTS = {
 // 🧠 Credit checker
 function checkAndDeductCredits(userId, cost) {
   const user = users[userId];
-
   if (!user) return { error: "User not found" };
   if (user.credits < cost) return { error: "Not enough credits" };
 
@@ -49,7 +48,7 @@ const PORT = process.env.PORT || 3000;
 // ═══════════════════════════════════════════
 app.get("/searchVideos", async (req, res) => {
   const meal = req.query.meal;
-  if (!meal) return res.status(400).json({ error: 'meal parameter is required' });
+  if (!meal) return res.status(400).json({ error: "meal parameter is required" });
 
   try {
     const response = await axios.get(
@@ -81,7 +80,7 @@ app.get("/searchVideos", async (req, res) => {
     res.json({ success: true, videos });
 
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch videos' });
+    res.status(500).json({ error: "Failed to fetch videos" });
   }
 });
 
@@ -90,12 +89,12 @@ app.get("/searchVideos", async (req, res) => {
 // ═══════════════════════════════════════════
 app.get("/getMealImage", async (req, res) => {
   const meal = req.query.meal;
-  if (!meal) return res.status(400).json({ error: 'meal parameter is required' });
+  if (!meal) return res.status(400).json({ error: "meal parameter is required" });
 
   try {
     const response = await axios.get("https://api.pexels.com/v1/search", {
       headers: { Authorization: process.env.PEXELS_API_KEY },
-      params: { query: meal + ' food dish', per_page: 3 }
+      params: { query: meal + " food dish", per_page: 3 }
     });
 
     const photo = response.data.photos[0];
@@ -109,7 +108,7 @@ app.get("/getMealImage", async (req, res) => {
     });
 
   } catch {
-    res.status(500).json({ error: 'Failed to fetch image' });
+    res.status(500).json({ error: "Failed to fetch image" });
   }
 });
 
@@ -124,10 +123,10 @@ app.post("/cookWithIngredients", async (req, res) => {
   if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
 
   const { ingredients, country } = req.body;
-  if (!ingredients) return res.status(400).json({ error: 'ingredients required' });
+  if (!ingredients) return res.status(400).json({ error: "ingredients required" });
 
   try {
-    const prompt = `You are a professional chef. Suggest 3 meals using these ingredients: ${ingredients.join(', ')}.`;
+    const prompt = `You are a professional chef. Suggest 3 meals using these ingredients: ${ingredients.join(", ")}. The style should match ${country || "global"} cuisine. Return ONLY JSON: { "recipes": [] }`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -145,6 +144,9 @@ app.post("/cookWithIngredients", async (req, res) => {
 
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+    if (!jsonMatch) throw new Error("AI did not return JSON format.");
+
     const parsedData = JSON.parse(jsonMatch[0]);
 
     res.json({
@@ -154,7 +156,50 @@ app.post("/cookWithIngredients", async (req, res) => {
     });
 
   } catch (error) {
-    res.status(500).json({ error: 'AI failed' });
+    res.status(500).json({ error: "Backend Error" });
+  }
+});
+
+// ═══════════════════════════════════════════
+// 🧠 WEEKLY PLAN
+// ═══════════════════════════════════════════
+app.post("/generateWeeklyPlan", async (req, res) => {
+  const userId = req.headers["userid"];
+  const creditCheck = checkAndDeductCredits(userId, CREDIT_COSTS.generateWeeklyPlan);
+  if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
+
+  try {
+    const prompt = `Generate a 7-day meal plan. Return JSON only.`;
+
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+        }
+      }
+    );
+
+    const text = response.data.choices[0].message.content;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+    if (!jsonMatch) throw new Error("AI did not return JSON format.");
+
+    const parsedData = JSON.parse(jsonMatch[0]);
+
+    res.json({
+      success: true,
+      plan: parsedData.plan,
+      remainingCredits: users[userId].credits
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: "Backend Error" });
   }
 });
 
@@ -169,31 +214,36 @@ app.post("/rescueLeftovers", async (req, res) => {
   if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
 
   const { leftovers } = req.body;
-  if (!leftovers || leftovers.length === 0) return res.status(400).json({ error: 'leftovers required' });
+  if (!leftovers) return res.status(400).json({ error: "leftovers required" });
 
   try {
-    const prompt = `I have these leftovers: ${leftovers.join(', ')}. Suggest 3 creative recipes I can make with them.
-    Return ONLY a valid JSON object in this exact format, with NO conversational text:
-    {
-      "recipes": [
-        { "title": "Recipe Name", "description": "Brief description", "matchPercentage": 95, "missedIngredients": ["salt"] }
-      ]
-    }`;
+    const prompt = `Use leftovers: ${leftovers.join(", ")}. Return JSON recipes only.`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
-      { model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }] },
-      { headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.OPENAI_API_KEY}` } }
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+        }
+      }
     );
 
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("AI did not return JSON format.");
 
-    res.json({ success: true, recipes: JSON.parse(jsonMatch[0]).recipes, remainingCredits: users[userId].credits });
+    res.json({
+      success: true,
+      recipes: JSON.parse(jsonMatch[0]).recipes,
+      remainingCredits: users[userId].credits
+    });
+
   } catch (error) {
-    console.error("RescueLeftovers Error:", error.response?.data || error.message);
-    res.status(500).json({ error: `Backend Error: ${error.message}` });
+    res.status(500).json({ error: "Backend Error" });
   }
 });
 
@@ -208,32 +258,36 @@ app.post("/getCookingSteps", async (req, res) => {
   if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
 
   const { mealName } = req.body;
-  if (!mealName) return res.status(400).json({ error: 'mealName required' });
+  if (!mealName) return res.status(400).json({ error: "mealName required" });
 
   try {
-    const prompt = `Provide step-by-step cooking instructions for making ${mealName}.
-    Return ONLY a valid JSON object in this exact format, with NO conversational text:
-    {
-      "steps": [
-        "Step 1: prep...",
-        "Step 2: cook..."
-      ]
-    }`;
+    const prompt = `Steps for ${mealName}. JSON only.`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
-      { model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }] },
-      { headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.OPENAI_API_KEY}` } }
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+        }
+      }
     );
 
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("AI did not return JSON format.");
 
-    res.json({ success: true, steps: JSON.parse(jsonMatch[0]).steps, remainingCredits: users[userId].credits });
+    res.json({
+      success: true,
+      steps: JSON.parse(jsonMatch[0]).steps,
+      remainingCredits: users[userId].credits
+    });
+
   } catch (error) {
-    console.error("CookingSteps Error:", error.response?.data || error.message);
-    res.status(500).json({ error: `Backend Error: ${error.message}` });
+    res.status(500).json({ error: "Backend Error" });
   }
 });
 
@@ -248,115 +302,44 @@ app.post("/budgetMeals", async (req, res) => {
   if (creditCheck.error) return res.status(403).json({ error: creditCheck.error });
 
   const { budget } = req.body;
-  if (!budget) return res.status(400).json({ error: 'budget required' });
+  if (!budget) return res.status(400).json({ error: "budget required" });
 
   try {
-    const prompt = `Suggest 3 highly nutritious meals that can be made for under $${budget} total.
-    Return ONLY a valid JSON object in this exact format, with NO conversational text:
-    {
-      "meals": [
-        { "title": "Meal Name", "cost": "$5", "description": "Brief description" }
-      ]
-    }`;
+    const prompt = `Meals under ${budget}. JSON only.`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
-      { model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }] },
-      { headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.OPENAI_API_KEY}` } }
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }]
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+        }
+      }
     );
 
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("AI did not return JSON format.");
 
-    res.json({ success: true, meals: JSON.parse(jsonMatch[0]).meals, remainingCredits: users[userId].credits });
+    res.json({
+      success: true,
+      meals: JSON.parse(jsonMatch[0]).meals,
+      remainingCredits: users[userId].credits
+    });
+
   } catch (error) {
-    console.error("BudgetMeals Error:", error.response?.data || error.message);
-    res.status(500).json({ error: `Backend Error: ${error.message}` });
+    res.status(500).json({ error: "Backend Error" });
   }
 });
-
-// ═══════════════════════════════════════════
-// 🥗 NUTRITION & DIET PLAN
-// ═══════════════════════════════════════════
-app.post("/getNutrition", async (req, res) => {
-  const userId = req.headers["userid"];
-  if (!userId) return res.status(401).json({ error: "User ID required" });
-
-  const { goal } = req.body;
-  if (!goal) return res.status(400).json({ error: 'goal required' });
-
-  try {
-    const prompt = `Provide nutritional advice and diet planning for someone with the goal to: "${goal}".
-    Return ONLY a valid JSON object in this exact format, with NO conversational text:
-    {
-      "foodsToEatMore": ["food 1", "food 2"],
-      "foodsToReduce": ["food 1", "food 2"],
-      "mealIdeas": ["meal idea 1", "meal idea 2"]
-    }`;
-
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      { model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }] },
-      { headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.OPENAI_API_KEY}` } }
-    );
-
-    const text = response.data.choices[0].message.content;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("AI did not return JSON format.");
-
-    // Spread the parsed JSON object directly into the response
-    res.json({ success: true, ...JSON.parse(jsonMatch[0]), remainingCredits: users[userId].credits });
-  } catch (error) {
-    console.error("GetNutrition Error:", error.response?.data || error.message);
-    res.status(500).json({ error: `Backend Error: ${error.message}` });
-  }
-});
-
-// ═══════════════════════════════════════════
-// 📝 EXTRACT RECIPE
-// ═══════════════════════════════════════════
-app.post("/extractRecipe", async (req, res) => {
-  const userId = req.headers["userid"];
-  if (!userId) return res.status(401).json({ error: "User ID required" });
-
-  const { mealName, videoTitle } = req.body;
-  if (!mealName) return res.status(400).json({ error: 'mealName required' });
-
-  try {
-    const prompt = `Write a highly detailed recipe for ${mealName}. (Context to help: ${videoTitle || ''}).
-    Return ONLY a valid JSON object in this exact format, with NO conversational text:
-    {
-      "ingredients": ["1 cup rice", "2 tomatoes"],
-      "steps": ["Step 1...", "Step 2..."],
-      "cookingTime": "30 mins",
-      "tips": ["Tip 1", "Tip 2"]
-    }`;
-
-    const response = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      { model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }] },
-      { headers: { "Content-Type": "application/json", "Authorization": `Bearer ${process.env.OPENAI_API_KEY}` } }
-    );
-
-    const text = response.data.choices[0].message.content;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("AI did not return JSON format.");
-
-    res.json({ success: true, ...JSON.parse(jsonMatch[0]), remainingCredits: users[userId].credits });
-  } catch (error) {
-    console.error("ExtractRecipe Error:", error.response?.data || error.message);
-    res.status(500).json({ error: `Backend Error: ${error.message}` });
-  }
-});
-
-
 
 // ═══════════════════════════════════════════
 // 🚀 START SERVER
 // ═══════════════════════════════════════════
 app.get("/", (req, res) => {
-  res.send("🚀 Nutriverse API is running");
+  res.send("🚀 Nutriverse API is running (OpenAI)");
 });
 
 app.listen(PORT, () => {
