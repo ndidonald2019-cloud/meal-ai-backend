@@ -629,6 +629,29 @@ app.post("/createCheckout", async (req, res) => {
       }
     );
 
+    // Log full response structure to diagnose SDK shape
+    console.log(
+      "🔍 Checkout raw response:",
+      JSON.stringify(checkout, null, 2)
+    );
+
+    // SDK v4 returns: { data: { id, attributes: { url, ... } }, error, statusCode }
+    // The checkout resource sits directly at checkout.data — not checkout.data.data
+    const checkoutId = checkout.data?.id;
+    const checkoutUrl = checkout.data?.attributes?.url;
+
+    console.log("✅ Checkout created — id:", checkoutId, "url:", checkoutUrl);
+
+    if (!checkoutUrl) {
+      console.error(
+        "❌ No checkout URL in response. Full object:",
+        JSON.stringify(checkout, null, 2)
+      );
+      return res.status(500).json({
+        error: "No checkout URL returned from payment provider",
+      });
+    }
+
     // Save pending payment to JSON database
     savePayment({
       user_id,
@@ -637,16 +660,14 @@ app.post("/createCheckout", async (req, res) => {
       credits_added: selectedPackage.credits,
       package_id,
       payment_gateway: "lemonsqueezy",
-      payment_reference: checkout.data?.data?.id,
+      payment_reference: checkoutId,
       status: "pending",
     });
 
-    console.log("✅ Checkout created:", checkout.data?.data?.id);
-
     res.json({
       success: true,
-      checkout_url: checkout.data?.data?.attributes?.url,
-      checkout_id: checkout.data?.data?.id,
+      checkout_url: checkoutUrl,
+      checkout_id: checkoutId,
     });
   } catch (error) {
     console.error("Checkout error:", error.message);
