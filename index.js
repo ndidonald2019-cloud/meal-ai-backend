@@ -635,6 +635,32 @@ app.post("/createCheckout", async (req, res) => {
       JSON.stringify(checkout, null, 2)
     );
 
+    // Check if the SDK returned an error (e.g. bad API key, invalid variant ID)
+    if (checkout.error) {
+      console.error(
+        "❌ Lemon Squeezy SDK error:",
+        checkout.error,
+        "| statusCode:",
+        checkout.statusCode
+      );
+      return res.status(500).json({
+        error: "Payment provider returned an error",
+        message: checkout.error?.message || String(checkout.error),
+        statusCode: checkout.statusCode,
+      });
+    }
+
+    // Guard: make sure checkout.data exists before drilling into it
+    if (!checkout.data) {
+      console.error(
+        "❌ Lemon Squeezy response has no data field. Full object:",
+        JSON.stringify(checkout, null, 2)
+      );
+      return res.status(500).json({
+        error: "Unexpected response from payment provider — no data returned",
+      });
+    }
+
     // SDK v4 returns: { data: { id, attributes: { url, ... } }, error, statusCode }
     // The checkout resource sits directly at checkout.data — not checkout.data.data
     const checkoutId = checkout.data?.id;
