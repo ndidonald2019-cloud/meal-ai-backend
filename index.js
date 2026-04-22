@@ -31,6 +31,7 @@ app.use(
 // NORMAL MIDDLEWARE
 // ═══════════════════════════════════════════
 app.use(cors());
+app.set("trust proxy", 1);
 app.use(express.json());
 app.use("/auth", authRoutes); // ← Auth routes mounted here
 
@@ -181,6 +182,7 @@ const CREDIT_COSTS = {
   getCookingSteps: 5,
   extractRecipe: 3,
   budgetMeals: 5,
+  extractFromVideo: 8,
 };
 
 const SIGNUP_BONUS_CREDITS = 10;
@@ -616,6 +618,148 @@ app.post("/budgetMeals", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════
+// 🎬 EXTRACT RECIPE FROM VIDEO
+// ═══════════════════════════════════════════
+app.post("/extractFromVideo", async (req, res) => {
+  console.log("=== /extractFromVideo endpoint hit ===");
+  console.log("Request body:", JSON.stringify(req.body, null, 2));
+  console.log("userId from headers:", req.headers["userid"]);
+  console.log("videoUrl received:", req.body?.videoUrl);
+  console.log("videoId received:", req.body?.videoId);
+
+  const userId = req.headers["userid"];
+  if (!userId)
+    return res.status(401).json({ error: "User ID required" });
+
+  const { videoUrl, videoId: rawVideoId } = req.body;
+
+  if (!videoUrl && !rawVideoId)
+    return res
+      .status(400)
+      .json({ error: "videoUrl or videoId is required" });
+
+  // Extract video ID from URL if a full URL was provided
+  let videoId = rawVideoId;
+  if (!videoId && videoUrl) {
+    const urlPatterns = [
+      /[?&]v=([^&#]+)/,
+      /youtu\.be\/([^?&#]+)/,
+      /youtube\.com\/embed\/([^?&#]+)/,
+      /youtube\.com\/shorts\/([^?&#]+)/,
+    ];
+    for (const pattern of urlPatterns) {
+      const match = videoUrl.match(pattern);
+      if (match) {
+        videoId = match[1];
+        break;
+      }
+    }
+  }
+
+  if (!videoId)
+    return res
+      .status(400)
+      .json({ error: "Could not extract a valid YouTube video ID" });
+
+  const creditCheck = checkAndDeductCredits(
+    userId,
+    CREDIT_COSTS.extractFromVideo
+  );
+  if (creditCheck.error)
+    return res.status(403).json({ error: creditCheck.error });
+
+  try {
+    // Fetch video details (title + description) from YouTube Data API
+    const ytResponse = await axios.get(
+      "https://www.googleapis.com/youtube/v3/videos",
+      {
+        params: {
+          part: "snippet",
+          id: videoId,
+          key: process.env.YOUTUBE_API_KEY,
+        },
+      }
+    );
+
+    const videoItem = ytResponse.data.items?.[0];
+    if (!videoItem) {
+      return res
+        .status(404)
+        .json({ error: "Video not found on YouTube" });
+    }
+
+    const title = videoItem.snippet.title || "";
+    const description = videoItem.snippet.description || "";
+
+    if (!description.trim()) {
+      return res.status(422).json({
+        error:
+          "This video has no description to extract a recipe from",
+      });
+    }
+
+    const prompt = `You are a professional chef and recipe extractor. \
+A user wants to cook a recipe from a YouTube video titled: "${title}". \
+Below is the video description which may contain the recipe. \
+Extract the ingredients (with quantities) and step-by-step cooking instructions from it. \
+If the description does not contain a full recipe, do your best to infer a reasonable recipe based on the video title. \
+Return ONLY valid JSON in this exact format, with no extra text:
+{
+  "ingredients": [
+    { "item": "ingredient name", "quantity": "amount and unit" }
+  ],
+  "steps": [
+    "Step 1: ...",
+    "Step 2: ..."
+  ]
+}
+
+Video description:
+${description.slice(0, 3000)}`;
+
+    const aiResponse = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+
+    const text = aiResponse.data.choices[0].message.content;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch)
+      throw new Error("AI did not return JSON format.");
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    const user = getUser(userId);
+
+    saveUsageLog(userId, "extractFromVideo", CREDIT_COSTS.extractFromVideo);
+
+    res.json({
+      success: true,
+      videoId,
+      title,
+      ingredients: parsed.ingredients || [],
+      steps: parsed.steps || [],
+      remainingCredits: user ? user.credits : 0,
+    });
+  } catch (error) {
+    console.error("extractFromVideo error — message:", error.message);
+    console.error("extractFromVideo error — stack:", error.stack);
+    console.error("extractFromVideo error — full:", error);
+    res
+      .status(500)
+      .json({ error: "Couldn't extract recipe. Try again." });
+  }
+});
+
+// ═══════════════════════════════════════════
 // ✅ NEW — GET CREDIT PACKAGES
 // ═══════════════════════════════════════════
 app.get("/creditPackages", (req, res) => {
@@ -689,6 +833,55 @@ app.post("/createCheckout", async (req, res) => {
       }
     );
 
+    // Log full response structure to diagnose SDK shape
+    console.log(
+      "🔍 Checkout raw response:",
+      JSON.stringify(checkout, null, 2)
+    );
+
+    // Check if the SDK returned an error (e.g. bad API key, invalid variant ID)
+    if (checkout.error) {
+      console.error(
+        "❌ Lemon Squeezy SDK error:",
+        checkout.error,
+        "| statusCode:",
+        checkout.statusCode
+      );
+      return res.status(500).json({
+        error: "Payment provider returned an error",
+        message: checkout.error?.message || String(checkout.error),
+        statusCode: checkout.statusCode,
+      });
+    }
+
+    // Guard: make sure checkout.data exists before drilling into it
+    if (!checkout.data) {
+      console.error(
+        "❌ Lemon Squeezy response has no data field. Full object:",
+        JSON.stringify(checkout, null, 2)
+      );
+      return res.status(500).json({
+        error: "Unexpected response from payment provider — no data returned",
+      });
+    }
+
+    // SDK v4 returns: { data: { data: { id, attributes: { url, ... } } }, error, statusCode }
+    // The JSON:API envelope sits at checkout.data; the actual resource is at checkout.data.data
+    const checkoutId = checkout.data?.data?.id;
+    const checkoutUrl = checkout.data?.data?.attributes?.url;
+
+    console.log("✅ Checkout created — id:", checkoutId, "url:", checkoutUrl);
+
+    if (!checkoutUrl) {
+      console.error(
+        "❌ No checkout URL in response. Full object:",
+        JSON.stringify(checkout, null, 2)
+      );
+      return res.status(500).json({
+        error: "No checkout URL returned from payment provider",
+      });
+    }
+
     // Save pending payment to JSON database
     savePayment({
       user_id,
@@ -697,16 +890,14 @@ app.post("/createCheckout", async (req, res) => {
       credits_added: selectedPackage.credits,
       package_id,
       payment_gateway: "lemonsqueezy",
-      payment_reference: checkout.data?.data?.id,
+      payment_reference: checkoutId,
       status: "pending",
     });
 
-    console.log("✅ Checkout created:", checkout.data?.data?.id);
-
     res.json({
       success: true,
-      checkout_url: checkout.data?.data?.attributes?.url,
-      checkout_id: checkout.data?.data?.id,
+      checkout_url: checkoutUrl,
+      checkout_id: checkoutId,
     });
   } catch (error) {
     console.error("Checkout error:", error.message);
@@ -1064,6 +1255,7 @@ app.get("/", (req, res) => {
         "POST /getCookingSteps",
         "POST /extractRecipe",
         "POST /budgetMeals",
+        "POST /extractFromVideo",
       ],
       payments: [
         "GET /creditPackages",
