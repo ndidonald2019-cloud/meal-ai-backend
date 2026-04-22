@@ -369,7 +369,24 @@ app.post("/generateWeeklyPlan", async (req, res) => {
     return res.status(403).json({ error: creditCheck.error });
 
   try {
-    const prompt = `Generate a 7-day meal plan. Return JSON only.`;
+    const prompt = `You are a professional nutritionist. Generate a detailed 7-day meal plan. Return ONLY valid JSON with this exact structure:
+{
+  "plan": [
+    {
+      "day": "Monday",
+      "breakfast": "meal name with ingredients",
+      "lunch": "meal name with ingredients",
+      "dinner": "meal name with ingredients",
+      "snack": "optional snack",
+      "tips": "nutritional tips or cooking instructions for this day"
+    },
+    ... (repeat for all 7 days)
+  ],
+  "shoppingList": ["ingredient1", "ingredient2", ...],
+  "weeklyTips": "General tips for the week"
+}
+
+Make sure each day has complete meal details with ingredients included.`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -394,10 +411,13 @@ app.post("/generateWeeklyPlan", async (req, res) => {
 
     res.json({
       success: true,
-      plan: parsedData.plan,
+      plan: parsedData.plan || [],
+      shoppingList: parsedData.shoppingList || [],
+      weeklyTips: parsedData.weeklyTips || "",
       remainingCredits: user ? user.credits : 0,
     });
   } catch (error) {
+    console.error("Weekly plan error:", error.message);
     res.status(500).json({ error: "Backend Error" });
   }
 });
