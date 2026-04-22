@@ -179,6 +179,7 @@ const CREDIT_COSTS = {
   generateWeeklyPlan: 15,
   rescueLeftovers: 3,
   getCookingSteps: 5,
+  extractRecipe: 3,
   budgetMeals: 5,
 };
 
@@ -317,11 +318,10 @@ app.post("/cookWithIngredients", async (req, res) => {
     return res.status(400).json({ error: "ingredients required" });
 
   try {
-    const prompt = `You are a professional chef. Suggest 3 meals using these ingredients: ${ingredients.join(
+    const prompt = `You are a professional chef. Suggest 8 meals using these ingredients: ${ingredients.join(
       ", "
-    )}. The style should match ${
-      country || "global"
-    } cuisine. Return ONLY JSON: { "recipes": [] }`;
+    )}. The style should match ${country || "global"
+      } cuisine. Return ONLY JSON: { "recipes": [] }`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -501,6 +501,66 @@ app.post("/getCookingSteps", async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: "Backend Error" });
+  }
+});
+
+// ═══════════════════════════════════════════
+// 🎬 EXTRACT RECIPE (FROM VIDEO)
+// Extracts ingredients and cooking steps from a meal
+// ═══════════════════════════════════════════
+app.post("/extractRecipe", async (req, res) => {
+  const userId = req.headers["userid"];
+  if (!userId)
+    return res.status(401).json({ error: "User ID required" });
+
+  const creditCheck = checkAndDeductCredits(
+    userId,
+    CREDIT_COSTS.extractRecipe || 2
+  );
+  if (creditCheck.error)
+    return res.status(403).json({ error: creditCheck.error });
+
+  const { mealName } = req.body;
+  if (!mealName)
+    return res.status(400).json({ error: "mealName required" });
+
+  try {
+    const prompt = `Extract recipe for "${mealName}". Return ONLY JSON with this structure: { "ingredients": ["ingredient1", "ingredient2", ...], "steps": ["step1", "step2", ...], "cookTime": "XX minutes", "servings": "X" }`;
+
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+
+    const text = response.data.choices[0].message.content;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    
+    if (!jsonMatch) throw new Error("AI did not return JSON format.");
+    
+    const parsedData = JSON.parse(jsonMatch[0]);
+    const user = getUser(userId);
+
+    res.json({
+      success: true,
+      mealName,
+      ingredients: parsedData.ingredients || [],
+      steps: parsedData.steps || [],
+      cookTime: parsedData.cookTime || "Unknown",
+      servings: parsedData.servings || "Unknown",
+      remainingCredits: user ? user.credits : 0,
+    });
+  } catch (error) {
+    console.error("Extract recipe error:", error.message);
+    res.status(500).json({ error: "Couldn't extract recipe. Try again." });
   }
 });
 
@@ -1002,6 +1062,7 @@ app.get("/", (req, res) => {
         "POST /generateWeeklyPlan",
         "POST /rescueLeftovers",
         "POST /getCookingSteps",
+        "POST /extractRecipe",
         "POST /budgetMeals",
       ],
       payments: [
