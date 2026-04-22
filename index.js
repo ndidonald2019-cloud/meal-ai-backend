@@ -31,6 +31,7 @@ app.use(
 // NORMAL MIDDLEWARE
 // ═══════════════════════════════════════════
 app.use(cors());
+app.set("trust proxy", 1);
 app.use(express.json());
 app.use("/auth", authRoutes); // ← Auth routes mounted here
 
