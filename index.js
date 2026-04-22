@@ -181,7 +181,7 @@ const CREDIT_COSTS = {
   rescueLeftovers: 3,
   getCookingSteps: 5,
   budgetMeals: 5,
-  extractFromVideo: 5,
+  extractFromVideo: 8,
 };
 
 const SIGNUP_BONUS_CREDITS = 10;
@@ -561,6 +561,12 @@ app.post("/budgetMeals", async (req, res) => {
 // 🎬 EXTRACT RECIPE FROM VIDEO
 // ═══════════════════════════════════════════
 app.post("/extractFromVideo", async (req, res) => {
+  console.log("=== /extractFromVideo endpoint hit ===");
+  console.log("Request body:", JSON.stringify(req.body, null, 2));
+  console.log("userId from headers:", req.headers["userid"]);
+  console.log("videoUrl received:", req.body?.videoUrl);
+  console.log("videoId received:", req.body?.videoId);
+
   const userId = req.headers["userid"];
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
@@ -684,7 +690,9 @@ ${description.slice(0, 3000)}`;
       remainingCredits: user ? user.credits : 0,
     });
   } catch (error) {
-    console.error("extractFromVideo error:", error.message);
+    console.error("extractFromVideo error — message:", error.message);
+    console.error("extractFromVideo error — stack:", error.stack);
+    console.error("extractFromVideo error — full:", error);
     res
       .status(500)
       .json({ error: "Couldn't extract recipe. Try again." });
