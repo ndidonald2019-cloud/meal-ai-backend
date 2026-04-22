@@ -369,24 +369,32 @@ app.post("/generateWeeklyPlan", async (req, res) => {
     return res.status(403).json({ error: creditCheck.error });
 
   try {
-    const prompt = `You are a professional nutritionist. Generate a detailed 7-day meal plan. Return ONLY valid JSON with this exact structure:
+    const prompt = `You are a professional nutritionist and meal planner. Generate a COMPLETE detailed 7-day meal plan with ALL information.
+
+RETURN ONLY VALID JSON with NO other text:
 {
   "plan": [
     {
       "day": "Monday",
-      "breakfast": "meal name with ingredients",
-      "lunch": "meal name with ingredients",
-      "dinner": "meal name with ingredients",
-      "snack": "optional snack",
-      "tips": "nutritional tips or cooking instructions for this day"
-    },
-    ... (repeat for all 7 days)
+      "breakfast": "Oatmeal with berries and honey - 400 calories",
+      "lunch": "Grilled chicken breast with brown rice and steamed broccoli - 600 calories",
+      "dinner": "Baked salmon with roasted vegetables - 650 calories",
+      "snack": "Greek yogurt with almonds - 200 calories",
+      "tips": "High protein day to support muscle building. Drink plenty of water."
+    }
   ],
-  "shoppingList": ["ingredient1", "ingredient2", ...],
-  "weeklyTips": "General tips for the week"
+  "shoppingList": ["chicken breast 1kg", "salmon fillets 500g", "brown rice 1kg", "oats 500g", "honey 200g", "almonds 300g", "greek yogurt 500g", "broccoli 1 head", "bell peppers 2", "carrots 500g"],
+  "weeklyTips": "Aim for balanced macros. Drink 8 glasses of water daily. Meal prep on Sunday for the week."
 }
 
-Make sure each day has complete meal details with ingredients included.`;
+RULES:
+- Include ALL 7 days (Monday to Sunday)
+- EACH day must have: breakfast, lunch, dinner, snack, and tips
+- Include estimated calories for each meal
+- Include full shopping list with quantities
+- Include weekly nutrition tips
+- Return VALID JSON ONLY
+- NO markdown or extra text`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -547,17 +555,27 @@ app.post("/extractRecipe", async (req, res) => {
     return res.status(400).json({ error: "mealName required" });
 
   try {
-    const prompt = `You are a professional chef. Extract a complete recipe for "${mealName}". 
+    const prompt = `You are a professional chef. Extract a COMPLETE recipe for "${mealName}". 
 
-IMPORTANT: Return ONLY a valid JSON object with NO other text. Use this exact structure:
+IMPORTANT: Return ONLY a valid JSON object with NO other text, NO markdown, NO explanations. Use this EXACT structure:
 {
-  "ingredients": ["ingredient1 with amount", "ingredient2 with amount", "ingredient3 with amount"],
-  "steps": ["Step 1: detailed instruction on what to do", "Step 2: detailed instruction on what to do", "Step 3: detailed instruction on what to do"],
-  "cookTime": "XX minutes",
-  "servings": "X servings"
+  "ingredients": ["1 cup flour", "2 eggs", "1 tablespoon salt"],
+  "steps": [
+    "Step 1: Preheat oven to 350 degrees fahrenheit. This ensures even cooking throughout the recipe.",
+    "Step 2: Mix flour and salt in a large bowl. Stir thoroughly until well combined.",
+    "Step 3: Add eggs one at a time and beat until mixture is smooth and creamy."
+  ],
+  "cookTime": "30 minutes",
+  "servings": "4 servings"
 }
 
-Make sure each step is a complete sentence starting with "Step X:" and contains full detailed instructions. Each ingredient should include the quantity and unit.`;
+RULES:
+- EVERY step must be detailed and explain exactly what to do
+- EVERY step must start with 'Step X:' followed by a complete explanation
+- NO numbered lists inside steps
+- MINIMUM 3 steps, MAXIMUM 10 steps
+- Each ingredient MUST include amount and unit
+- Return VALID JSON only`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -579,13 +597,28 @@ Make sure each step is a complete sentence starting with "Step X:" and contains 
     if (!jsonMatch) throw new Error("AI did not return JSON format.");
     
     const parsedData = JSON.parse(jsonMatch[0]);
+    
+    // Validate that steps have actual content, not just numbers
+    let validSteps = (parsedData.steps || []).filter(step => 
+      typeof step === 'string' && 
+      step.trim().length > 0 && 
+      step.includes(':') && 
+      step.split(':').length > 1 &&
+      step.split(':')[1].trim().length > 5 // Ensure there's actual content after the colon
+    );
+    
+    // If validation fails, return error
+    if (validSteps.length === 0) {
+      throw new Error("Steps were not properly formatted. Each step must be 'Step X: detailed instruction'.");
+    }
+    
     const user = getUser(userId);
 
     res.json({
       success: true,
       mealName,
       ingredients: parsedData.ingredients || [],
-      steps: parsedData.steps || [],
+      steps: validSteps,
       cookTime: parsedData.cookTime || "Unknown",
       servings: parsedData.servings || "Unknown",
       remainingCredits: user ? user.credits : 0,
