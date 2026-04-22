@@ -527,7 +527,17 @@ app.post("/extractRecipe", async (req, res) => {
     return res.status(400).json({ error: "mealName required" });
 
   try {
-    const prompt = `Extract recipe for "${mealName}". Return ONLY JSON with this structure: { "ingredients": ["ingredient1", "ingredient2", ...], "steps": ["step1", "step2", ...], "cookTime": "XX minutes", "servings": "X" }`;
+    const prompt = `You are a professional chef. Extract a complete recipe for "${mealName}". 
+
+IMPORTANT: Return ONLY a valid JSON object with NO other text. Use this exact structure:
+{
+  "ingredients": ["ingredient1 with amount", "ingredient2 with amount", "ingredient3 with amount"],
+  "steps": ["Step 1: detailed instruction on what to do", "Step 2: detailed instruction on what to do", "Step 3: detailed instruction on what to do"],
+  "cookTime": "XX minutes",
+  "servings": "X servings"
+}
+
+Make sure each step is a complete sentence starting with "Step X:" and contains full detailed instructions. Each ingredient should include the quantity and unit.`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
