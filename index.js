@@ -661,10 +661,10 @@ app.post("/createCheckout", async (req, res) => {
       });
     }
 
-    // SDK v4 returns: { data: { id, attributes: { url, ... } }, error, statusCode }
-    // The checkout resource sits directly at checkout.data — not checkout.data.data
-    const checkoutId = checkout.data?.id;
-    const checkoutUrl = checkout.data?.attributes?.url;
+    // SDK v4 returns: { data: { data: { id, attributes: { url, ... } } }, error, statusCode }
+    // The JSON:API envelope sits at checkout.data; the actual resource is at checkout.data.data
+    const checkoutId = checkout.data?.data?.id;
+    const checkoutUrl = checkout.data?.data?.attributes?.url;
 
     console.log("✅ Checkout created — id:", checkoutId, "url:", checkoutUrl);
 
