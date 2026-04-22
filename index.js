@@ -320,10 +320,10 @@ app.post("/cookWithIngredients", async (req, res) => {
     return res.status(400).json({ error: "ingredients required" });
 
   try {
-    const prompt = `You are a professional chef. Suggest 8 meals using these ingredients: ${ingredients.join(
+    const prompt = `You are a professional chef. Suggest 10 delicious meals using these ingredients: ${ingredients.join(
       ", "
     )}. The style should match ${country || "global"
-      } cuisine. Return ONLY JSON: { "recipes": [] }`;
+      } cuisine. Return ONLY valid JSON with this structure: { "recipes": [{"name": "meal name", "description": "short description", "prepTime": "X minutes", "difficulty": "easy/medium/hard"}, ...] }. Make sure to return exactly 10 different recipes.`
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -422,9 +422,9 @@ app.post("/rescueLeftovers", async (req, res) => {
     return res.status(400).json({ error: "leftovers required" });
 
   try {
-    const prompt = `Use leftovers: ${leftovers.join(
+    const prompt = `You are a professional chef. Suggest 10 creative recipes to rescue these leftovers: ${leftovers.join(
       ", "
-    )}. Return JSON recipes only.`;
+    )}. Return ONLY valid JSON with this structure: { "recipes": [{"name": "meal name", "description": "short description", "prepTime": "X minutes", "difficulty": "easy/medium/hard"}, ...] }. Make sure to return exactly 10 different delicious recipes.`
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
