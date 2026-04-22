@@ -181,6 +181,7 @@ const CREDIT_COSTS = {
   rescueLeftovers: 3,
   getCookingSteps: 5,
   budgetMeals: 5,
+  extractFromVideo: 5,
 };
 
 const SIGNUP_BONUS_CREDITS = 10;
@@ -553,6 +554,140 @@ app.post("/budgetMeals", async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: "Backend Error" });
+  }
+});
+
+// ═══════════════════════════════════════════
+// 🎬 EXTRACT RECIPE FROM VIDEO
+// ═══════════════════════════════════════════
+app.post("/extractFromVideo", async (req, res) => {
+  const userId = req.headers["userid"];
+  if (!userId)
+    return res.status(401).json({ error: "User ID required" });
+
+  const { videoUrl, videoId: rawVideoId } = req.body;
+
+  if (!videoUrl && !rawVideoId)
+    return res
+      .status(400)
+      .json({ error: "videoUrl or videoId is required" });
+
+  // Extract video ID from URL if a full URL was provided
+  let videoId = rawVideoId;
+  if (!videoId && videoUrl) {
+    const urlPatterns = [
+      /[?&]v=([^&#]+)/,
+      /youtu\.be\/([^?&#]+)/,
+      /youtube\.com\/embed\/([^?&#]+)/,
+      /youtube\.com\/shorts\/([^?&#]+)/,
+    ];
+    for (const pattern of urlPatterns) {
+      const match = videoUrl.match(pattern);
+      if (match) {
+        videoId = match[1];
+        break;
+      }
+    }
+  }
+
+  if (!videoId)
+    return res
+      .status(400)
+      .json({ error: "Could not extract a valid YouTube video ID" });
+
+  const creditCheck = checkAndDeductCredits(
+    userId,
+    CREDIT_COSTS.extractFromVideo
+  );
+  if (creditCheck.error)
+    return res.status(403).json({ error: creditCheck.error });
+
+  try {
+    // Fetch video details (title + description) from YouTube Data API
+    const ytResponse = await axios.get(
+      "https://www.googleapis.com/youtube/v3/videos",
+      {
+        params: {
+          part: "snippet",
+          id: videoId,
+          key: process.env.YOUTUBE_API_KEY,
+        },
+      }
+    );
+
+    const videoItem = ytResponse.data.items?.[0];
+    if (!videoItem) {
+      return res
+        .status(404)
+        .json({ error: "Video not found on YouTube" });
+    }
+
+    const title = videoItem.snippet.title || "";
+    const description = videoItem.snippet.description || "";
+
+    if (!description.trim()) {
+      return res.status(422).json({
+        error:
+          "This video has no description to extract a recipe from",
+      });
+    }
+
+    const prompt = `You are a professional chef and recipe extractor. \
+A user wants to cook a recipe from a YouTube video titled: "${title}". \
+Below is the video description which may contain the recipe. \
+Extract the ingredients (with quantities) and step-by-step cooking instructions from it. \
+If the description does not contain a full recipe, do your best to infer a reasonable recipe based on the video title. \
+Return ONLY valid JSON in this exact format, with no extra text:
+{
+  "ingredients": [
+    { "item": "ingredient name", "quantity": "amount and unit" }
+  ],
+  "steps": [
+    "Step 1: ...",
+    "Step 2: ..."
+  ]
+}
+
+Video description:
+${description.slice(0, 3000)}`;
+
+    const aiResponse = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+
+    const text = aiResponse.data.choices[0].message.content;
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch)
+      throw new Error("AI did not return JSON format.");
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    const user = getUser(userId);
+
+    saveUsageLog(userId, "extractFromVideo", CREDIT_COSTS.extractFromVideo);
+
+    res.json({
+      success: true,
+      videoId,
+      title,
+      ingredients: parsed.ingredients || [],
+      steps: parsed.steps || [],
+      remainingCredits: user ? user.credits : 0,
+    });
+  } catch (error) {
+    console.error("extractFromVideo error:", error.message);
+    res
+      .status(500)
+      .json({ error: "Couldn't extract recipe. Try again." });
   }
 });
 
@@ -1051,6 +1186,7 @@ app.get("/", (req, res) => {
         "POST /rescueLeftovers",
         "POST /getCookingSteps",
         "POST /budgetMeals",
+        "POST /extractFromVideo",
       ],
       payments: [
         "GET /creditPackages",
