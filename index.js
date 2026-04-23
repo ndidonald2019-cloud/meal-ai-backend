@@ -3,14 +3,14 @@ const axios = require("axios");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
 const {
   lemonSqueezySetup,
   createCheckout,
   getOrder,
 } = require("@lemonsqueezy/lemonsqueezy.js");
 require("dotenv").config();
+
+const pool = require("./db");
 
 // ═══════════════════════════════════════════
 // AUTH SYSTEM (NEW — PostgreSQL)
@@ -46,105 +46,118 @@ lemonSqueezySetup({
 });
 
 // ═══════════════════════════════════════════
-// JSON FILE DATABASE
-// Stores all users and payments locally
+// POSTGRESQL DATABASE
+// Persistent storage — survives redeployments
 // ═══════════════════════════════════════════
-const DB_FILE = path.join(__dirname, "database.json");
 
-// Create database file if it does not exist
-function initDatabase() {
-  if (!fs.existsSync(DB_FILE)) {
-    const emptyDB = {
-      users: {},
-      payments: [],
-      usage_logs: [],
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(emptyDB, null, 2));
-    console.log("✅ Database file created");
-  }
-}
+// Create tables on startup if they don't exist
+async function initDatabase() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id                TEXT PRIMARY KEY,
+      email             TEXT NOT NULL DEFAULT '',
+      credits           INTEGER NOT NULL DEFAULT 0,
+      signup_bonus_given BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 
-// Read database
-function readDB() {
-  try {
-    initDatabase();
-    const data = fs.readFileSync(DB_FILE, "utf8");
-    return JSON.parse(data);
-  } catch (error) {
-    console.error("Error reading database:", error.message);
-    return { users: {}, payments: [], usage_logs: [] };
-  }
-}
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payments (
+      id                SERIAL PRIMARY KEY,
+      user_id           TEXT NOT NULL,
+      amount            NUMERIC(10, 2),
+      currency          TEXT,
+      credits_added     INTEGER,
+      package_id        TEXT,
+      payment_gateway   TEXT,
+      payment_reference TEXT,
+      status            TEXT,
+      created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 
-// Write database
-function writeDB(data) {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-    return true;
-  } catch (error) {
-    console.error("Error writing database:", error.message);
-    return false;
-  }
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS usage_logs (
+      id           SERIAL PRIMARY KEY,
+      user_id      TEXT NOT NULL,
+      feature      TEXT,
+      credits_used INTEGER,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  console.log("✅ PostgreSQL tables ready");
 }
 
 // Get user from database
-function getUser(user_id) {
-  const db = readDB();
-  return db.users[user_id] || null;
+async function getUser(user_id) {
+  const result = await pool.query(
+    "SELECT * FROM users WHERE id = $1",
+    [user_id]
+  );
+  return result.rows[0] || null;
 }
 
-// Create new user in database
-function createUser(user_id, email) {
-  const db = readDB();
-  if (!db.users[user_id]) {
-    db.users[user_id] = {
-      id: user_id,
-      email: email || "",
-      credits: 0,
-      signup_bonus_given: false,
-      created_at: new Date().toISOString(),
-    };
-    writeDB(db);
+// Create new user in database (no-op if already exists)
+async function createUser(user_id, email) {
+  const result = await pool.query(
+    `INSERT INTO users (id, email, credits, signup_bonus_given)
+     VALUES ($1, $2, 0, FALSE)
+     ON CONFLICT (id) DO NOTHING
+     RETURNING *`,
+    [user_id, email || ""]
+  );
+  if (result.rows.length > 0) {
     console.log("New user created:", user_id);
+    return result.rows[0];
   }
-  return db.users[user_id];
+  // Already existed — return current row
+  return getUser(user_id);
 }
 
 // Update user credits
-function updateUserCredits(user_id, newCredits) {
-  const db = readDB();
-  if (db.users[user_id]) {
-    db.users[user_id].credits = newCredits;
-    writeDB(db);
-    return true;
-  }
-  return false;
+async function updateUserCredits(user_id, newCredits) {
+  const result = await pool.query(
+    "UPDATE users SET credits = $1 WHERE id = $2",
+    [newCredits, user_id]
+  );
+  return result.rowCount > 0;
 }
 
 // Save payment record
-function savePayment(paymentData) {
-  const db = readDB();
-  db.payments.push({
-    ...paymentData,
-    created_at: new Date().toISOString(),
-  });
-  writeDB(db);
+async function savePayment(paymentData) {
+  await pool.query(
+    `INSERT INTO payments
+       (user_id, amount, currency, credits_added, package_id,
+        payment_gateway, payment_reference, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      paymentData.user_id,
+      paymentData.amount,
+      paymentData.currency,
+      paymentData.credits_added,
+      paymentData.package_id,
+      paymentData.payment_gateway,
+      paymentData.payment_reference,
+      paymentData.status,
+    ]
+  );
 }
 
 // Save usage log
-function saveUsageLog(user_id, feature, credits_used) {
-  const db = readDB();
-  db.usage_logs.push({
-    user_id,
-    feature,
-    credits_used,
-    created_at: new Date().toISOString(),
-  });
-  writeDB(db);
+async function saveUsageLog(user_id, feature, credits_used) {
+  await pool.query(
+    "INSERT INTO usage_logs (user_id, feature, credits_used) VALUES ($1, $2, $3)",
+    [user_id, feature, credits_used]
+  );
 }
 
 // Initialize database on startup
-initDatabase();
+initDatabase().catch((err) => {
+  console.error("❌ Failed to initialise database tables:", err.message);
+  process.exit(1);
+});
 
 // ═══════════════════════════════════════════
 // 💰 CREDIT PACKAGES
@@ -188,25 +201,22 @@ const CREDIT_COSTS = {
 const SIGNUP_BONUS_CREDITS = 10;
 
 // ═══════════════════════════════════════════
-// 🧠 CREDIT CHECKER (works with JSON database)
+// 🧠 CREDIT CHECKER (PostgreSQL)
 // ═══════════════════════════════════════════
-function checkAndDeductCredits(userId, cost) {
-  // Auto create user if not exists (for test-user)
-  let db = readDB();
-  if (!db.users[userId]) {
-    createUser(userId, "");
-    // Give test-user 100 credits
-    db = readDB();
-    db.users[userId].credits = 100;
-    writeDB(db);
+async function checkAndDeductCredits(userId, cost) {
+  // Auto-create user if not exists (for test-user), seed with 100 credits
+  let user = await getUser(userId);
+  if (!user) {
+    await createUser(userId, "");
+    await updateUserCredits(userId, 100);
+    user = await getUser(userId);
   }
 
-  const user = db.users[userId];
   if (!user) return { error: "User not found" };
   if (user.credits < cost) return { error: "Not enough credits" };
 
   const newCredits = user.credits - cost;
-  updateUserCredits(userId, newCredits);
+  await updateUserCredits(userId, newCredits);
 
   return { success: true, remaining: newCredits };
 }
@@ -308,7 +318,7 @@ app.post("/cookWithIngredients", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
+  const creditCheck = await checkAndDeductCredits(
     userId,
     CREDIT_COSTS.cookWithIngredients
   );
@@ -344,7 +354,7 @@ app.post("/cookWithIngredients", async (req, res) => {
     if (!jsonMatch) throw new Error("AI did not return JSON format.");
     const parsedData = JSON.parse(jsonMatch[0]);
 
-    const user = getUser(userId);
+    const user = await getUser(userId);
 
     res.json({
       success: true,
@@ -361,7 +371,7 @@ app.post("/cookWithIngredients", async (req, res) => {
 // ═══════════════════════════════════════════
 app.post("/generateWeeklyPlan", async (req, res) => {
   const userId = req.headers["userid"];
-  const creditCheck = checkAndDeductCredits(
+  const creditCheck = await checkAndDeductCredits(
     userId,
     CREDIT_COSTS.generateWeeklyPlan
   );
@@ -426,7 +436,7 @@ RULES:
     const jsonStr = jsonMatch[1] || jsonMatch[0];
     const parsedData = JSON.parse(jsonStr);
 
-    const user = getUser(userId);
+    const user = await getUser(userId);
 
     res.json({
       success: true,
@@ -449,7 +459,7 @@ app.post("/rescueLeftovers", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
+  const creditCheck = await checkAndDeductCredits(
     userId,
     CREDIT_COSTS.rescueLeftovers
   );
@@ -482,7 +492,7 @@ app.post("/rescueLeftovers", async (req, res) => {
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
 
-    const user = getUser(userId);
+    const user = await getUser(userId);
 
     res.json({
       success: true,
@@ -502,7 +512,7 @@ app.post("/getCookingSteps", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
+  const creditCheck = await checkAndDeductCredits(
     userId,
     CREDIT_COSTS.getCookingSteps
   );
@@ -533,7 +543,7 @@ app.post("/getCookingSteps", async (req, res) => {
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
 
-    const user = getUser(userId);
+    const user = await getUser(userId);
 
     res.json({
       success: true,
@@ -554,7 +564,7 @@ app.post("/extractRecipe", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
+  const creditCheck = await checkAndDeductCredits(
     userId,
     CREDIT_COSTS.extractRecipe || 2
   );
@@ -618,7 +628,7 @@ RULES:
     const jsonStr = jsonMatch[1] || jsonMatch[0];
     const parsedData = JSON.parse(jsonStr);
     
-    const user = getUser(userId);
+    const user = await getUser(userId);
 
     res.json({
       success: true,
@@ -643,7 +653,7 @@ app.post("/budgetMeals", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
+  const creditCheck = await checkAndDeductCredits(
     userId,
     CREDIT_COSTS.budgetMeals
   );
@@ -674,7 +684,7 @@ app.post("/budgetMeals", async (req, res) => {
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
 
-    const user = getUser(userId);
+    const user = await getUser(userId);
 
     res.json({
       success: true,
@@ -730,7 +740,7 @@ app.post("/extractFromVideo", async (req, res) => {
       .status(400)
       .json({ error: "Could not extract a valid YouTube video ID" });
 
-  const creditCheck = checkAndDeductCredits(
+  const creditCheck = await checkAndDeductCredits(
     userId,
     CREDIT_COSTS.extractFromVideo
   );
@@ -806,9 +816,9 @@ ${description.slice(0, 3000)}`;
       throw new Error("AI did not return JSON format.");
 
     const parsed = JSON.parse(jsonMatch[0]);
-    const user = getUser(userId);
+    const user = await getUser(userId);
 
-    saveUsageLog(userId, "extractFromVideo", CREDIT_COSTS.extractFromVideo);
+    await saveUsageLog(userId, "extractFromVideo", CREDIT_COSTS.extractFromVideo);
 
     res.json({
       success: true,
@@ -871,7 +881,7 @@ app.post("/createCheckout", async (req, res) => {
   }
 
   // Create user in database if not exists
-  createUser(user_id, email);
+  await createUser(user_id, email);
 
   try {
     const checkout = await createCheckout(
@@ -951,8 +961,8 @@ app.post("/createCheckout", async (req, res) => {
       });
     }
 
-    // Save pending payment to JSON database
-    savePayment({
+    // Save pending payment to database
+    await savePayment({
       user_id,
       amount: selectedPackage.price_usd,
       currency: "USD",
@@ -1023,35 +1033,33 @@ app.post("/webhook/lemonsqueezy", async (req, res) => {
         }
 
         // Check if already processed
-        const db = readDB();
         const orderId = order.id.toString();
-        const existingPayment = db.payments.find(
-          (p) =>
-            p.payment_reference === orderId &&
-            p.status === "completed"
+        const existingPaymentResult = await pool.query(
+          "SELECT id FROM payments WHERE payment_reference = $1 AND status = 'completed'",
+          [orderId]
         );
 
-        if (existingPayment) {
+        if (existingPaymentResult.rows.length > 0) {
           console.log("Already processed:", orderId);
           return res.json({ received: true });
         }
 
         // Get user current credits
-        let user = getUser(user_id);
+        let user = await getUser(user_id);
         if (!user) {
           // Create user if not exists
-          createUser(user_id, "");
-          user = getUser(user_id);
+          await createUser(user_id, "");
+          user = await getUser(user_id);
         }
 
         const creditsToAdd = parseInt(credits);
         const newBalance = (user.credits || 0) + creditsToAdd;
 
         // Add credits to user
-        updateUserCredits(user_id, newBalance);
+        await updateUserCredits(user_id, newBalance);
 
         // Save completed payment
-        savePayment({
+        await savePayment({
           user_id,
           amount: order.attributes?.total / 100,
           currency: "USD",
@@ -1063,7 +1071,7 @@ app.post("/webhook/lemonsqueezy", async (req, res) => {
         });
 
         // Save usage log
-        saveUsageLog(user_id, "credit_purchase", -creditsToAdd);
+        await saveUsageLog(user_id, "credit_purchase", -creditsToAdd);
 
         console.log("✅ Payment fully processed!");
         console.log(`User: ${user_id}`);
@@ -1090,14 +1098,15 @@ app.post("/verifyPayment", async (req, res) => {
   }
 
   try {
-    // Check local JSON database first
-    const db = readDB();
-    const completedPayment = db.payments.find(
-      (p) => p.user_id === user_id && p.status === "completed"
+    // Check database for a completed payment for this user
+    const completedPaymentResult = await pool.query(
+      "SELECT * FROM payments WHERE user_id = $1 AND status = 'completed' LIMIT 1",
+      [user_id]
     );
+    const completedPayment = completedPaymentResult.rows[0] || null;
 
     if (completedPayment) {
-      const user = getUser(user_id);
+      const user = await getUser(user_id);
       return res.json({
         success: true,
         verified: true,
@@ -1118,16 +1127,16 @@ app.post("/verifyPayment", async (req, res) => {
             .json({ error: "Package not found" });
         }
 
-        let user = getUser(user_id);
+        let user = await getUser(user_id);
         if (!user) {
-          createUser(user_id, "");
-          user = getUser(user_id);
+          await createUser(user_id, "");
+          user = await getUser(user_id);
         }
 
         const newBalance = (user.credits || 0) + pkg.credits;
-        updateUserCredits(user_id, newBalance);
+        await updateUserCredits(user_id, newBalance);
 
-        savePayment({
+        await savePayment({
           user_id,
           amount: pkg.price_usd,
           currency: "USD",
@@ -1169,7 +1178,7 @@ app.get("/creditBalance", async (req, res) => {
     return res.status(401).json({ error: "User ID required" });
   }
 
-  const user = getUser(user_id);
+  const user = await getUser(user_id);
 
   if (!user) {
     return res.status(404).json({ error: "User not found" });
@@ -1202,7 +1211,7 @@ app.post("/deductCredits", async (req, res) => {
     return res.status(400).json({ error: "Invalid feature name" });
   }
 
-  const user = getUser(user_id);
+  const user = await getUser(user_id);
   if (!user) {
     return res.status(404).json({ error: "User not found" });
   }
@@ -1219,8 +1228,8 @@ app.post("/deductCredits", async (req, res) => {
   }
 
   const newBalance = user.credits - cost;
-  updateUserCredits(user_id, newBalance);
-  saveUsageLog(user_id, feature, cost);
+  await updateUserCredits(user_id, newBalance);
+  await saveUsageLog(user_id, feature, cost);
 
   res.json({
     success: true,
@@ -1243,9 +1252,9 @@ app.post("/signupBonus", async (req, res) => {
   }
 
   // Create user if not exists
-  createUser(user_id, email || "");
+  await createUser(user_id, email || "");
 
-  const user = getUser(user_id);
+  const user = await getUser(user_id);
 
   if (user.signup_bonus_given) {
     return res.status(400).json({
@@ -1254,12 +1263,13 @@ app.post("/signupBonus", async (req, res) => {
   }
 
   const newBalance = (user.credits || 0) + SIGNUP_BONUS_CREDITS;
-  updateUserCredits(user_id, newBalance);
+  await updateUserCredits(user_id, newBalance);
 
   // Mark bonus as given
-  const db = readDB();
-  db.users[user_id].signup_bonus_given = true;
-  writeDB(db);
+  await pool.query(
+    "UPDATE users SET signup_bonus_given = TRUE WHERE id = $1",
+    [user_id]
+  );
 
   console.log(`🎁 Signup bonus given to ${user_id}`);
 
@@ -1282,7 +1292,7 @@ app.post("/createUser", async (req, res) => {
     return res.status(400).json({ error: "user_id required" });
   }
 
-  const existingUser = getUser(user_id);
+  const existingUser = await getUser(user_id);
   if (existingUser) {
     return res.json({
       success: true,
@@ -1294,8 +1304,8 @@ app.post("/createUser", async (req, res) => {
     });
   }
 
-  createUser(user_id, email || "");
-  const newUser = getUser(user_id);
+  await createUser(user_id, email || "");
+  const newUser = await getUser(user_id);
 
   res.json({
     success: true,
@@ -1342,5 +1352,4 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📁 Database file: ${DB_FILE}`);
 });
