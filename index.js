@@ -45,6 +45,25 @@ lemonSqueezySetup({
   },
 });
 
+// Validate Lemon Squeezy configuration on startup
+const requiredLemonSqueezyVars = [
+  "LEMONSQUEEZY_API_KEY",
+  "LEMONSQUEEZY_STORE_ID",
+  "LEMONSQUEEZY_STARTER_VARIANT_ID",
+  "LEMONSQUEEZY_POPULAR_VARIANT_ID",
+  "LEMONSQUEEZY_PRO_VARIANT_ID",
+];
+
+const missingVars = requiredLemonSqueezyVars.filter((v) => !process.env[v]);
+if (missingVars.length > 0) {
+  console.warn(
+    `⚠️  WARNING: Missing Lemon Squeezy environment variables: ${missingVars.join(", ")}`
+  );
+  console.warn(
+    "   Payment/checkout functionality will not work until these are configured."
+  );
+}
+
 // ═══════════════════════════════════════════
 // POSTGRESQL DATABASE
 // Persistent storage — survives redeployments
@@ -880,10 +899,29 @@ app.post("/createCheckout", async (req, res) => {
     return res.status(400).json({ error: "Invalid package id" });
   }
 
+  // Validate that variant_id is set
+  if (!selectedPackage.variant_id) {
+    console.error(
+      `❌ Missing variant_id for package ${package_id}. Environment variables not properly configured.`
+    );
+    return res.status(500).json({
+      error: "Payment system not configured",
+      message:
+        "The payment system is not properly configured. Please contact support.",
+    });
+  }
+
   // Create user in database if not exists
-  await createUser(user_id, email);
+  try {
+    await createUser(user_id, email);
+  } catch (userError) {
+    console.error("Error creating user:", userError.message);
+    // Don't fail here, continue with checkout
+  }
 
   try {
+    console.log(`Starting checkout for package: ${package_id}, variant: ${selectedPackage.variant_id}`);
+    
     const checkout = await createCheckout(
       process.env.LEMONSQUEEZY_STORE_ID,
       selectedPackage.variant_id,
@@ -980,6 +1018,7 @@ app.post("/createCheckout", async (req, res) => {
     });
   } catch (error) {
     console.error("Checkout error:", error.message);
+    console.error("Checkout error stack:", error.stack);
     res.status(500).json({
       error: "Failed to create checkout",
       message: error.message,
