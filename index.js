@@ -180,7 +180,7 @@ const CREDIT_COSTS = {
   generateWeeklyPlan: 15,
   rescueLeftovers: 3,
   getCookingSteps: 5,
-  extractRecipe: 3,
+  extractRecipe: 8,
   budgetMeals: 5,
   extractFromVideo: 8,
 };
@@ -411,9 +411,20 @@ RULES:
     );
 
     const text = response.data.choices[0].message.content;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("AI did not return JSON format.");
-    const parsedData = JSON.parse(jsonMatch[0]);
+    
+    // Extract JSON - handle markdown code blocks
+    let jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (!jsonMatch) {
+      jsonMatch = text.match(/\{[\s\S]*\}/);
+    }
+    if (!jsonMatch) {
+      console.error("Failed to extract JSON from:", text.substring(0, 300));
+      throw new Error("AI response is not valid JSON format");
+    }
+    
+    // Get the JSON string (handle markdown case)
+    const jsonStr = jsonMatch[1] || jsonMatch[0];
+    const parsedData = JSON.parse(jsonStr);
 
     const user = getUser(userId);
 
@@ -592,25 +603,20 @@ RULES:
     );
 
     const text = response.data.choices[0].message.content;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
     
-    if (!jsonMatch) throw new Error("AI did not return JSON format.");
-    
-    const parsedData = JSON.parse(jsonMatch[0]);
-    
-    // Validate that steps have actual content, not just numbers
-    let validSteps = (parsedData.steps || []).filter(step => 
-      typeof step === 'string' && 
-      step.trim().length > 0 && 
-      step.includes(':') && 
-      step.split(':').length > 1 &&
-      step.split(':')[1].trim().length > 5 // Ensure there's actual content after the colon
-    );
-    
-    // If validation fails, return error
-    if (validSteps.length === 0) {
-      throw new Error("Steps were not properly formatted. Each step must be 'Step X: detailed instruction'.");
+    // Extract JSON - handle markdown code blocks
+    let jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (!jsonMatch) {
+      jsonMatch = text.match(/\{[\s\S]*\}/);
     }
+    if (!jsonMatch) {
+      console.error("Failed to extract JSON from:", text.substring(0, 300));
+      throw new Error("AI did not return JSON format.");
+    }
+    
+    // Get the JSON string (handle markdown case)
+    const jsonStr = jsonMatch[1] || jsonMatch[0];
+    const parsedData = JSON.parse(jsonStr);
     
     const user = getUser(userId);
 
@@ -618,7 +624,7 @@ RULES:
       success: true,
       mealName,
       ingredients: parsedData.ingredients || [],
-      steps: validSteps,
+      steps: parsedData.steps || [],
       cookTime: parsedData.cookTime || "Unknown",
       servings: parsedData.servings || "Unknown",
       remainingCredits: user ? user.credits : 0,
