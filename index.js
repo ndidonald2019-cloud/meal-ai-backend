@@ -469,7 +469,7 @@ app.post("/generateWeeklyPlan", async (req, res) => {
   try {
     const prompt = `You are a professional nutritionist and meal planner. Generate a COMPLETE detailed 7-day meal plan with ALL information.
 
-RETURN ONLY VALID JSON with NO other text:
+RETURN ONLY VALID JSON with NO other text, NO markdown, NO code fences:
 {
   "plan": [
     {
@@ -479,6 +479,14 @@ RETURN ONLY VALID JSON with NO other text:
       "dinner": "Baked salmon with roasted vegetables - 650 calories",
       "snack": "Greek yogurt with almonds - 200 calories",
       "tips": "High protein day to support muscle building. Drink plenty of water."
+    },
+    {
+      "day": "Tuesday",
+      "breakfast": "Scrambled eggs with whole grain toast and avocado - 450 calories",
+      "lunch": "Lentil soup with crusty bread - 550 calories",
+      "dinner": "Beef stir-fry with mixed vegetables and noodles - 700 calories",
+      "snack": "Apple slices with peanut butter - 250 calories",
+      "tips": "Great source of iron and fibre today. Stay hydrated between meals."
     }
   ],
   "shoppingList": ["chicken breast 1kg", "salmon fillets 500g", "brown rice 1kg", "oats 500g", "honey 200g", "almonds 300g", "greek yogurt 500g", "broccoli 1 head", "bell peppers 2", "carrots 500g"],
@@ -486,19 +494,19 @@ RETURN ONLY VALID JSON with NO other text:
 }
 
 RULES:
-- Include ALL 7 days (Monday to Sunday)
-- EACH day must have: breakfast, lunch, dinner, snack, and tips
-- Include estimated calories for each meal
-- Include full shopping list with quantities
-- Include weekly nutrition tips
-- Return VALID JSON ONLY
-- NO markdown or extra text`;
+- Include ALL 7 days: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday
+- EACH day MUST have all five fields: breakfast, lunch, dinner, snack, and tips
+- Include estimated calories for EVERY meal
+- Include a full shopping list with specific quantities for the whole week
+- Include meaningful weekly nutrition tips
+- Return VALID JSON ONLY — no markdown, no code fences, no extra text`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
         model: "gpt-4o-mini",
         messages: [{ role: "user", content: prompt }],
+        response_format: { type: "json_object" },
       },
       {
         headers: {
@@ -509,20 +517,36 @@ RULES:
     );
 
     const text = response.data.choices[0].message.content;
-    
-    // Extract JSON - handle markdown code blocks
+    console.log("generateWeeklyPlan — raw AI response (first 500 chars):", text.substring(0, 500));
+
+    // Extract JSON — handle both raw JSON and markdown code blocks
     let jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
     if (!jsonMatch) {
       jsonMatch = text.match(/\{[\s\S]*\}/);
     }
     if (!jsonMatch) {
-      console.error("Failed to extract JSON from:", text.substring(0, 300));
+      console.error("generateWeeklyPlan — failed to extract JSON. Full response:", text);
       throw new Error("AI response is not valid JSON format");
     }
-    
-    // Get the JSON string (handle markdown case)
+
+    // jsonMatch[1] is the captured group inside ```json ... ```, jsonMatch[0] is the raw {} match
     const jsonStr = jsonMatch[1] || jsonMatch[0];
-    const parsedData = JSON.parse(jsonStr);
+    let parsedData;
+    try {
+      parsedData = JSON.parse(jsonStr);
+    } catch (parseErr) {
+      console.error("generateWeeklyPlan — JSON.parse failed. Raw string:", jsonStr.substring(0, 500));
+      throw new Error("Failed to parse AI response as JSON: " + parseErr.message);
+    }
+
+    if (!parsedData.plan || parsedData.plan.length === 0) {
+      console.error("generateWeeklyPlan — plan array is empty or missing. Parsed data:", JSON.stringify(parsedData).substring(0, 500));
+      throw new Error("AI returned an empty meal plan");
+    }
+
+    if (parsedData.plan.length < 7) {
+      console.warn(`generateWeeklyPlan — plan has only ${parsedData.plan.length} days instead of 7`);
+    }
 
     const user = await getUser(userId);
 
@@ -538,7 +562,6 @@ RULES:
     res.status(500).json({ error: "Backend Error" });
   }
 });
-
 // ═══════════════════════════════════════════
 // ♻️ LEFTOVER RESCUE (UNCHANGED)
 // ═══════════════════════════════════════════
@@ -870,21 +893,38 @@ app.post("/extractFromVideo", async (req, res) => {
       });
     }
 
-    const prompt = `You are a professional chef and recipe extractor. \
-A user wants to cook a recipe from a YouTube video titled: "${title}". \
-Below is the video description which may contain the recipe. \
-Extract the ingredients (with quantities) and step-by-step cooking instructions from it. \
-If the description does not contain a full recipe, do your best to infer a reasonable recipe based on the video title. \
-Return ONLY valid JSON in this exact format, with no extra text:
+    const prompt = `You are a professional chef and recipe extractor.
+A user wants to cook a recipe from a YouTube video titled: "${title}".
+Below is the video description which may contain the recipe.
+Extract the ingredients (with quantities) and detailed step-by-step cooking instructions from it.
+If the description does not contain a full recipe, infer a complete, detailed recipe based on the video title.
+
+Return ONLY valid JSON in this exact format, with no extra text, no markdown, and no code fences:
 {
+  "title": "Recipe name here",
+  "description": "A brief 1-2 sentence overview of the dish, its flavour profile, and why it is worth making.",
   "ingredients": [
-    { "item": "ingredient name", "quantity": "amount and unit" }
+    { "item": "chicken breast", "quantity": "500 g" },
+    { "item": "olive oil", "quantity": "2 tablespoons" }
   ],
   "steps": [
-    "Step 1: ...",
-    "Step 2: ..."
-  ]
+    "Step 1: Prepare your ingredients by washing and chopping all vegetables into bite-sized pieces. Pat the chicken dry with paper towels so it browns evenly during cooking.",
+    "Step 2: Heat the olive oil in a large skillet over medium-high heat until shimmering. Add the chicken and sear for 4-5 minutes per side until golden brown and a crust forms.",
+    "Step 3: Add the chopped vegetables to the pan and stir to combine with the chicken juices. Season generously with salt, pepper, and your chosen spices.",
+    "Step 4: Reduce heat to medium-low, cover the pan, and cook for a further 10-12 minutes until the chicken is cooked through and the vegetables are tender.",
+    "Step 5: Taste and adjust seasoning as needed. Serve hot, garnished with fresh herbs if desired."
+  ],
+  "cookTime": "30 minutes",
+  "servings": "4 servings"
 }
+
+RULES:
+- EVERY step must be a complete, detailed sentence explaining exactly what to do and why — minimum 20 words per step
+- EVERY step must start with "Step X:" followed by a thorough explanation
+- Include AT LEAST 5 steps and no more than 12 steps
+- Each ingredient MUST include a specific amount and unit
+- The "description" field must be a meaningful 1-2 sentence summary of the dish
+- Return VALID JSON ONLY — no markdown, no code fences, no extra commentary
 
 Video description:
 ${description.slice(0, 3000)}`;
@@ -904,19 +944,31 @@ ${description.slice(0, 3000)}`;
     );
 
     const text = aiResponse.data.choices[0].message.content;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch)
-      throw new Error("AI did not return JSON format.");
 
-    const parsed = JSON.parse(jsonMatch[0]);
+    // Extract JSON — handle both raw JSON and markdown code blocks
+    let jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (!jsonMatch) {
+      jsonMatch = text.match(/\{[\s\S]*\}/);
+    }
+    if (!jsonMatch) {
+      console.error("extractFromVideo — failed to extract JSON from AI response:", text.substring(0, 500));
+      throw new Error("AI did not return JSON format.");
+    }
+
+    // jsonMatch[1] is the captured group inside ```json ... ```, jsonMatch[0] is the raw {} match
+    const jsonStr = jsonMatch[1] || jsonMatch[0];
+    const parsed = JSON.parse(jsonStr);
     const user = await getUser(userId);
 
     res.json({
       success: true,
       videoId,
-      title,
+      title: parsed.title || title,
+      description: parsed.description || "",
       ingredients: parsed.ingredients || [],
       steps: parsed.steps || [],
+      cookTime: parsed.cookTime || "Unknown",
+      servings: parsed.servings || "Unknown",
       remainingCredits: user ? user.credits : 0,
     });
   } catch (error) {
