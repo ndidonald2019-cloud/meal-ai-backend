@@ -220,22 +220,89 @@ const CREDIT_COSTS = {
 const SIGNUP_BONUS_CREDITS = 10;
 
 // ═══════════════════════════════════════════
+// 🛡️ DEDUPLICATION SAFEGUARD
+// Prevents duplicate credit deductions within 2 seconds
+// Tracks: user_id → { timestamp, feature, amount }
+// ═══════════════════════════════════════════
+const recentDeductions = new Map();
+const DEDUP_WINDOW_MS = 2000; // 2 seconds
+
+function isRecentDuplicateDeduction(userId, feature) {
+  const key = userId;
+  const now = Date.now();
+  const lastDeduction = recentDeductions.get(key);
+  
+  if (!lastDeduction) return false;
+  
+  // If the same user made a deduction within 2 seconds with same/similar feature
+  const isDuplicate = (now - lastDeduction.timestamp) < DEDUP_WINDOW_MS;
+  
+  if (isDuplicate) {
+    console.warn(
+      `⚠️  DUPLICATE DEDUCTION BLOCKED: User ${userId} tried to deduct ${feature} ` +
+      `(${now - lastDeduction.timestamp}ms after previous deduction)`
+    );
+  }
+  
+  return isDuplicate;
+}
+
+function recordDeduction(userId, feature, amount) {
+  recentDeductions.set(userId, {
+    timestamp: Date.now(),
+    feature,
+    amount
+  });
+}
+
+// ═══════════════════════════════════════════
 // 🧠 CREDIT CHECKER (PostgreSQL)
 // ═══════════════════════════════════════════
-async function checkAndDeductCredits(userId, cost) {
+async function checkAndDeductCredits(userId, feature, cost) {
+  console.log(`\n💳 CREDIT DEDUCTION START: User ${userId}, Feature: ${feature}, Cost: ${cost}`);
+  
+  // Check for duplicate deductions (safeguard)
+  if (isRecentDuplicateDeduction(userId, feature)) {
+    console.error(`❌ DUPLICATE DEDUCTION REJECTED for user ${userId}`);
+    return { error: "Duplicate request - already processing" };
+  }
+  
   // Auto-create user if not exists (for test-user), seed with 100 credits
   let user = await getUser(userId);
   if (!user) {
+    console.log(`👤 Creating new user: ${userId}`);
     await createUser(userId, "");
     await updateUserCredits(userId, 100);
     user = await getUser(userId);
+    console.log(`👤 New user created with 100 bonus credits`);
   }
 
-  if (!user) return { error: "User not found" };
-  if (user.credits < cost) return { error: "Not enough credits" };
+  if (!user) {
+    console.error(`❌ User not found: ${userId}`);
+    return { error: "User not found" };
+  }
+  
+  console.log(`📊 User balance BEFORE deduction: ${user.credits} credits`);
+  
+  if (user.credits < cost) {
+    console.warn(`⚠️  INSUFFICIENT CREDITS: User ${userId} has ${user.credits}, needs ${cost}`);
+    return { error: "Not enough credits" };
+  }
 
+  const oldCredits = user.credits;
   const newCredits = user.credits - cost;
+  
   await updateUserCredits(userId, newCredits);
+  console.log(`✅ Credits deducted: ${oldCredits} → ${newCredits} (${cost} deducted)`);
+  
+  // Save usage log
+  await saveUsageLog(userId, feature, cost);
+  console.log(`📝 Usage logged: ${feature} = ${cost} credits`);
+  
+  // Record this deduction in safeguard
+  recordDeduction(userId, feature, cost);
+  
+  console.log(`💳 CREDIT DEDUCTION COMPLETE\n`);
 
   return { success: true, remaining: newCredits };
 }
@@ -339,6 +406,7 @@ app.post("/cookWithIngredients", async (req, res) => {
 
   const creditCheck = await checkAndDeductCredits(
     userId,
+    "cookWithIngredients",
     CREDIT_COSTS.cookWithIngredients
   );
   if (creditCheck.error)
@@ -392,6 +460,7 @@ app.post("/generateWeeklyPlan", async (req, res) => {
   const userId = req.headers["userid"];
   const creditCheck = await checkAndDeductCredits(
     userId,
+    "generateWeeklyPlan",
     CREDIT_COSTS.generateWeeklyPlan
   );
   if (creditCheck.error)
@@ -480,6 +549,7 @@ app.post("/rescueLeftovers", async (req, res) => {
 
   const creditCheck = await checkAndDeductCredits(
     userId,
+    "rescueLeftovers",
     CREDIT_COSTS.rescueLeftovers
   );
   if (creditCheck.error)
@@ -533,6 +603,7 @@ app.post("/getCookingSteps", async (req, res) => {
 
   const creditCheck = await checkAndDeductCredits(
     userId,
+    "getCookingSteps",
     CREDIT_COSTS.getCookingSteps
   );
   if (creditCheck.error)
@@ -585,6 +656,7 @@ app.post("/extractRecipe", async (req, res) => {
 
   const creditCheck = await checkAndDeductCredits(
     userId,
+    "extractRecipe",
     CREDIT_COSTS.extractRecipe || 2
   );
   if (creditCheck.error)
@@ -674,6 +746,7 @@ app.post("/budgetMeals", async (req, res) => {
 
   const creditCheck = await checkAndDeductCredits(
     userId,
+    "budgetMeals",
     CREDIT_COSTS.budgetMeals
   );
   if (creditCheck.error)
@@ -761,6 +834,7 @@ app.post("/extractFromVideo", async (req, res) => {
 
   const creditCheck = await checkAndDeductCredits(
     userId,
+    "extractFromVideo",
     CREDIT_COSTS.extractFromVideo
   );
   if (creditCheck.error)
@@ -836,8 +910,6 @@ ${description.slice(0, 3000)}`;
 
     const parsed = JSON.parse(jsonMatch[0]);
     const user = await getUser(userId);
-
-    await saveUsageLog(userId, "extractFromVideo", CREDIT_COSTS.extractFromVideo);
 
     res.json({
       success: true,
@@ -1233,13 +1305,34 @@ app.get("/creditBalance", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════
-// ✅ NEW — DEDUCT CREDITS
-// Call after every successful AI response
+// ⚠️  DEPRECATED — DEDUCT CREDITS (CAUSES DOUBLE DEDUCTION)
+// 
+// ARCHITECTURE WARNING (April 24, 2026):
+// This endpoint causes DOUBLE DEDUCTION when called after feature endpoints.
+// 
+// Feature endpoints (cookWithIngredients, generateWeeklyPlan, etc.)
+// ALREADY deduct credits automatically via checkAndDeductCredits().
+// 
+// CORRECT USAGE:
+// Frontend should ONLY call feature endpoints.
+// DO NOT call both a feature endpoint AND /deductCredits for the same request.
+// 
+// If you see credits deducted 2× the expected amount:
+// → Frontend is calling BOTH the feature endpoint AND /deductCredits
+// → This endpoint should NOT be called in normal flow
+// 
+// This endpoint is kept for backward compatibility only.
 // ═══════════════════════════════════════════
 app.post("/deductCredits", async (req, res) => {
   const { user_id, feature } = req.body;
 
+  console.log(`\n⚠️  DEPRECATED ENDPOINT: /deductCredits called`);
+  console.log(`   User: ${user_id}, Feature: ${feature}`);
+  console.log(`   ⚠️  WARNING: Feature endpoints already deduct credits!`);
+  console.log(`   ⚠️  This likely indicates DOUBLE DEDUCTION in frontend logic\n`);
+
   if (!user_id || !feature) {
+    console.error(`❌ Missing required params: user_id=${user_id}, feature=${feature}`);
     return res.status(400).json({
       error: "user_id and feature required",
     });
@@ -1247,15 +1340,30 @@ app.post("/deductCredits", async (req, res) => {
 
   const cost = CREDIT_COSTS[feature];
   if (!cost) {
+    console.error(`❌ Invalid feature: ${feature}`);
     return res.status(400).json({ error: "Invalid feature name" });
+  }
+
+  // Check for duplicate deductions (safeguard against double deduction)
+  if (isRecentDuplicateDeduction(user_id, feature)) {
+    console.error(`❌ DUPLICATE DEDUCTION BLOCKED!`);
+    console.error(`   /deductCredits called too soon after feature endpoint`);
+    console.error(`   This prevents the double deduction bug\n`);
+    return res.status(429).json({
+      error: "Duplicate request - already processing",
+      message: "Your request was just processed. Your credits have been deducted. Do not call /deductCredits after a feature endpoint.",
+      help: "Use feature endpoints only (cookWithIngredients, generateWeeklyPlan, etc). Do not call /deductCredits separately.",
+    });
   }
 
   const user = await getUser(user_id);
   if (!user) {
+    console.error(`❌ User not found: ${user_id}`);
     return res.status(404).json({ error: "User not found" });
   }
 
   if (user.credits < cost) {
+    console.warn(`⚠️  Insufficient credits: user has ${user.credits}, needs ${cost}`);
     return res.status(403).json({
       error: "insufficient_credits",
       message: `You need ${cost} credits. You have ${user.credits}.`,
@@ -1266,9 +1374,14 @@ app.post("/deductCredits", async (req, res) => {
     });
   }
 
+  const oldBalance = user.credits;
   const newBalance = user.credits - cost;
   await updateUserCredits(user_id, newBalance);
   await saveUsageLog(user_id, feature, cost);
+  recordDeduction(user_id, feature, cost);
+
+  console.log(`✅ DEDUCTED: ${oldBalance} → ${newBalance} (${cost} credits)`);
+  console.log(`   Note: This deduction happened in /deductCredits (deprecated endpoint)\n`);
 
   res.json({
     success: true,
