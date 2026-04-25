@@ -443,6 +443,8 @@ app.post("/cookWithIngredients", async (req, res) => {
 
     const user = await getUser(userId);
 
+    console.log(`✅ /cookWithIngredients — final deducted amount: ${CREDIT_COSTS.cookWithIngredients} credits (user ${userId})`);
+
     res.json({
       success: true,
       recipes: parsedData.recipes,
@@ -550,6 +552,8 @@ RULES:
 
     const user = await getUser(userId);
 
+    console.log(`✅ /generateWeeklyPlan — final deducted amount: ${CREDIT_COSTS.generateWeeklyPlan} credits (user ${userId})`);
+
     res.json({
       success: true,
       plan: parsedData.plan || [],
@@ -606,6 +610,8 @@ app.post("/rescueLeftovers", async (req, res) => {
 
     const user = await getUser(userId);
 
+    console.log(`✅ /rescueLeftovers — final deducted amount: ${CREDIT_COSTS.rescueLeftovers} credits (user ${userId})`);
+
     res.json({
       success: true,
       recipes: JSON.parse(jsonMatch[0]).recipes,
@@ -657,6 +663,8 @@ app.post("/getCookingSteps", async (req, res) => {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
 
     const user = await getUser(userId);
+
+    console.log(`✅ /getCookingSteps — final deducted amount: ${CREDIT_COSTS.getCookingSteps} credits (user ${userId})`);
 
     res.json({
       success: true,
@@ -744,6 +752,8 @@ RULES:
     
     const user = await getUser(userId);
 
+    console.log(`✅ /extractRecipe — final deducted amount: ${CREDIT_COSTS.extractRecipe} credits (user ${userId})`);
+
     res.json({
       success: true,
       mealName,
@@ -800,6 +810,8 @@ app.post("/budgetMeals", async (req, res) => {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
 
     const user = await getUser(userId);
+
+    console.log(`✅ /budgetMeals — final deducted amount: ${CREDIT_COSTS.budgetMeals} credits (user ${userId})`);
 
     res.json({
       success: true,
@@ -959,6 +971,8 @@ ${description.slice(0, 3000)}`;
     const jsonStr = jsonMatch[1] || jsonMatch[0];
     const parsed = JSON.parse(jsonStr);
     const user = await getUser(userId);
+
+    console.log(`✅ /extractFromVideo — final deducted amount: ${CREDIT_COSTS.extractFromVideo} credits (user ${userId})`);
 
     res.json({
       success: true,
@@ -1396,8 +1410,29 @@ app.post("/deductCredits", async (req, res) => {
     return res.status(400).json({ error: "Invalid feature name" });
   }
 
-  // Check for duplicate deductions (safeguard against double deduction)
-  if (isRecentDuplicateDeduction(user_id, feature)) {
+  // Route through checkAndDeductCredits() — the single authoritative deduction
+  // path — so credits are never deducted or logged more than once per call.
+  const creditCheck = await checkAndDeductCredits(user_id, feature, cost);
+
+  if (creditCheck.error) {
+    // Map the error string to an appropriate HTTP status
+    if (creditCheck.error === "User not found") {
+      console.error(`❌ User not found: ${user_id}`);
+      return res.status(404).json({ error: "User not found" });
+    }
+    if (creditCheck.error === "Not enough credits") {
+      const user = await getUser(user_id);
+      console.warn(`⚠️  Insufficient credits: user has ${user ? user.credits : 0}, needs ${cost}`);
+      return res.status(403).json({
+        error: "insufficient_credits",
+        message: `You need ${cost} credits. You have ${user ? user.credits : 0}.`,
+        credits_needed: cost,
+        credits_available: user ? user.credits : 0,
+        credits_short: cost - (user ? user.credits : 0),
+        show_paywall: true,
+      });
+    }
+    // Duplicate / other errors
     console.error(`❌ DUPLICATE DEDUCTION BLOCKED!`);
     console.error(`   /deductCredits called too soon after feature endpoint`);
     console.error(`   This prevents the double deduction bug\n`);
@@ -1408,39 +1443,15 @@ app.post("/deductCredits", async (req, res) => {
     });
   }
 
-  const user = await getUser(user_id);
-  if (!user) {
-    console.error(`❌ User not found: ${user_id}`);
-    return res.status(404).json({ error: "User not found" });
-  }
-
-  if (user.credits < cost) {
-    console.warn(`⚠️  Insufficient credits: user has ${user.credits}, needs ${cost}`);
-    return res.status(403).json({
-      error: "insufficient_credits",
-      message: `You need ${cost} credits. You have ${user.credits}.`,
-      credits_needed: cost,
-      credits_available: user.credits,
-      credits_short: cost - user.credits,
-      show_paywall: true,
-    });
-  }
-
-  const oldBalance = user.credits;
-  const newBalance = user.credits - cost;
-  await updateUserCredits(user_id, newBalance);
-  await saveUsageLog(user_id, feature, cost);
-  recordDeduction(user_id, feature, cost);
-
-  console.log(`✅ DEDUCTED: ${oldBalance} → ${newBalance} (${cost} credits)`);
+  console.log(`✅ /deductCredits — final deducted amount: ${cost} credits (user ${user_id})`);
   console.log(`   Note: This deduction happened in /deductCredits (deprecated endpoint)\n`);
 
   res.json({
     success: true,
     credits_used: cost,
-    credits_remaining: newBalance,
-    low_balance: newBalance <= 15,
-    critical_balance: newBalance <= 8,
+    credits_remaining: creditCheck.remaining,
+    low_balance: creditCheck.remaining <= 15,
+    critical_balance: creditCheck.remaining <= 8,
   });
 });
 
