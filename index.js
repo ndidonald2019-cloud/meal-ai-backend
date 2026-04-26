@@ -15,7 +15,7 @@ const app = express();
 // ═══════════════════════════════════════════
 const paddle = new Paddle(process.env.PADDLE_API_KEY, {
   environment: Environment.Sandbox,
-  // Change to Environment.Production when going live
+  // Using Sandbox for testing
 });
 
 // ═══════════════════════════════════════════
