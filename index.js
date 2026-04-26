@@ -5,6 +5,7 @@ const rateLimit = require("express-rate-limit");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const jwt = require("jsonwebtoken");
 const { Paddle, Environment, EventName } = require("@paddle/paddle-node-sdk");
 const { WebhooksValidator } = require("@paddle/paddle-node-sdk/dist/cjs/notifications/helpers/webhooks-validator");
 require("dotenv").config();
@@ -190,6 +191,25 @@ function checkAndDeductCredits(userId, cost) {
 
   return { success: true, remaining: newCredits };
 }
+
+// ═══════════════════════════════════════════
+// 🔒 AUTHENTICATION MIDDLEWARE
+// ═══════════════════════════════════════════
+const requireAuth = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "You must be logged in to purchase credits" });
+  }
+
+  const token = authHeader.split(" ")[1];
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: "You must be logged in to purchase credits" });
+  }
+};
 
 // ═══════════════════════════════════════════
 // 🚫 RATE LIMITER
@@ -688,8 +708,9 @@ app.get("/creditPackages", (req, res) => {
 // ═══════════════════════════════════════════
 // ✅ CREATE PADDLE CHECKOUT
 // ═══════════════════════════════════════════
-app.post("/createCheckout", async (req, res) => {
-  const { user_id, email, package_id } = req.body;
+app.post("/createCheckout", requireAuth, async (req, res) => {
+  const { email, package_id } = req.body;
+  const user_id = req.user.id || req.user.userId || req.body.user_id;
 
   console.log("createCheckout called:", { user_id, email, package_id });
 
@@ -766,8 +787,7 @@ app.post("/createCheckout", async (req, res) => {
     console.error("Paddle checkout error:", error.message);
     console.error("Full error:", JSON.stringify(error, null, 2));
     res.status(500).json({
-      error: "Failed to create checkout",
-      message: error.message,
+      error: "Server error"
     });
   }
 });
