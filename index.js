@@ -22,16 +22,17 @@ const paddle = new Paddle(process.env.PADDLE_API_KEY, {
 // ═══════════════════════════════════════════
 // WEBHOOK MUST COME BEFORE express.json()
 // ═══════════════════════════════════════════
-app.use(
-  "/webhook/paddle",
-  express.raw({ type: "application/json" })
-);
+// (Webhook raw parsing is now handled by express.json's verify function)
 
 // ═══════════════════════════════════════════
 // NORMAL MIDDLEWARE
 // ═══════════════════════════════════════════
 app.use(cors());
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString();
+  }
+}));
 
 // ═══════════════════════════════════════════
 // JSON FILE DATABASE
@@ -719,12 +720,16 @@ app.post("/webhook/paddle", async (req, res) => {
 
   try {
     console.log("--- WEBHOOK DEBUG ---");
-    console.log("Is body a buffer?", Buffer.isBuffer(req.body));
-    console.log("Body typeof:", typeof req.body);
+    console.log("Has rawBody?", !!req.rawBody);
     console.log("Secret length:", process.env.PADDLE_WEBHOOK_SECRET ? process.env.PADDLE_WEBHOOK_SECRET.length : 0);
     
+    if (!req.rawBody) {
+      console.error("rawBody is missing! Make sure express.json({ verify: ... }) is working.");
+      return res.status(400).json({ error: "No raw body" });
+    }
+
     const eventData = await paddle.webhooks.unmarshal(
-      req.body.toString(),
+      req.rawBody,
       process.env.PADDLE_WEBHOOK_SECRET,
       signature
     );
