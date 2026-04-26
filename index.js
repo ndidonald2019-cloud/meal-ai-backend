@@ -166,6 +166,7 @@ const CREDIT_COSTS = {
   rescueLeftovers: 3,
   getCookingSteps: 5,
   budgetMeals: 5,
+  extractRecipe: 8,
 };
 
 const SIGNUP_BONUS_CREDITS = 10;
@@ -485,6 +486,65 @@ app.post("/rescueLeftovers", async (req, res) => {
     });
   } catch (error) {
     console.error("rescueLeftovers error:", error.message);
+    res.status(500).json({ error: "Backend Error" });
+  }
+});
+
+// ═══════════════════════════════════════════
+// 🎥 EXTRACT RECIPE
+// ═══════════════════════════════════════════
+app.post("/extractRecipe", async (req, res) => {
+  const userId = req.headers["userid"];
+  if (!userId)
+    return res.status(401).json({ error: "User ID required" });
+
+  const creditCheck = checkAndDeductCredits(
+    userId,
+    CREDIT_COSTS.extractRecipe
+  );
+  if (creditCheck.error)
+    return res.status(403).json({ error: creditCheck.error });
+
+  const { mealName, url } = req.body;
+  if (!mealName)
+    return res.status(400).json({ error: "mealName required" });
+
+  try {
+    const prompt = \`You are a professional chef. Provide a complete, detailed recipe based on this cooking video title: "\${mealName}". \${url ? \`Video URL context: \${url}.\` : ""} Return ONLY valid JSON: { "meal_name": "", "description": "", "cooking_time": "", "servings": 4, "difficulty": "", "ingredients": [{ "name": "", "local_name": "", "quantity": "", "notes": "" }], "steps": [{ "number": 1, "title": "", "instruction": "", "duration": "" }], "tips": [] }\`;
+
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: \`Bearer \${process.env.OPENAI_API_KEY}\`,
+        },
+      }
+    );
+
+    const text = response.data.choices[0].message.content;
+    const jsonMatch = text.match(/\\{[\\s\\S]*\\}/);
+    const user = getUser(userId);
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    res.json({
+      success: true,
+      meal_name: parsed.meal_name,
+      description: parsed.description,
+      cooking_time: parsed.cooking_time,
+      servings: parsed.servings,
+      difficulty: parsed.difficulty,
+      ingredients: parsed.ingredients,
+      steps: parsed.steps,
+      tips: parsed.tips,
+      remainingCredits: user ? user.credits : 0,
+    });
+  } catch (error) {
+    console.error("extractRecipe error:", error.message);
     res.status(500).json({ error: "Backend Error" });
   }
 });
