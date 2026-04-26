@@ -12,7 +12,7 @@ require("dotenv").config();
 
 // Increase Paddle's extremely strict 5-second webhook tolerance to 5 minutes
 if (WebhooksValidator) {
-  WebhooksValidator.MAX_VALID_TIME_DIFFERENCE = 300; 
+  WebhooksValidator.MAX_VALID_TIME_DIFFERENCE = 300;
 }
 
 const app = express();
@@ -128,8 +128,8 @@ app.post("/auth/signup", async (req, res) => {
       user: { id: userId, name: name || "", email, credits: SIGNUP_BONUS_CREDITS }
     });
   } catch (error) {
-    console.error("Signup error:", error);
-    res.status(500).json({ error: "Server error during signup" });
+    console.error("Signup error:", error.message);
+    res.status(500).json({ error: "Server error during signup", detail: error.message });
   }
 });
 
@@ -154,8 +154,8 @@ app.post("/auth/login", async (req, res) => {
       user: { id: user.id, name: user.name || "", email: user.email, credits: user.credits }
     });
   } catch (error) {
-    console.error("Login error:", error);
-    res.status(500).json({ error: "Server error during login" });
+    console.error("Login error:", error.message);
+    res.status(500).json({ error: "Server error during login", detail: error.message });
   }
 });
 
@@ -240,8 +240,8 @@ app.get("/checkout", (req, res) => {
 app.get("/searchVideos", async (req, res) => {
   const meal = req.query.meal;
   if (!meal)
-    return res.status(400).json({ 
-      error: "meal parameter is required" 
+    return res.status(400).json({
+      error: "meal parameter is required"
     });
 
   try {
@@ -284,8 +284,8 @@ app.get("/searchVideos", async (req, res) => {
 app.get("/getMealImage", async (req, res) => {
   const meal = req.query.meal;
   if (!meal)
-    return res.status(400).json({ 
-      error: "meal parameter is required" 
+    return res.status(400).json({
+      error: "meal parameter is required"
     });
 
   try {
@@ -330,9 +330,8 @@ app.post("/cookWithIngredients", async (req, res) => {
   try {
     const prompt = `You are a professional chef. Suggest 10 meals using these ingredients: ${ingredients.join(
       ", "
-    )}. The style should match ${
-      country || "global"
-    } cuisine. Return ONLY valid JSON with this structure: { "recipes": [{ "title": "", "description": "", "matchPercentage": 90, "missedIngredients": [], "usedIngredients": [], "cookTime": "", "difficulty": "" }] }`;
+    )}. The style should match ${country || "global"
+      } cuisine. Return ONLY valid JSON with this structure: { "recipes": [{ "title": "", "description": "", "matchPercentage": 90, "missedIngredients": [], "usedIngredients": [], "cookTime": "", "difficulty": "" }] }`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -663,8 +662,8 @@ app.post("/createCheckout", requireAuth, async (req, res) => {
 
   const selectedPackage = CREDIT_PACKAGES[package_id];
   if (!selectedPackage) {
-    return res.status(400).json({ 
-      error: `Invalid package: ${package_id}` 
+    return res.status(400).json({
+      error: `Invalid package: ${package_id}`
     });
   }
 
@@ -749,7 +748,7 @@ app.post("/webhook/paddle", async (req, res) => {
     console.log("--- WEBHOOK DEBUG ---");
     console.log("Has rawBody?", !!req.rawBody);
     console.log("Secret length:", process.env.PADDLE_WEBHOOK_SECRET ? process.env.PADDLE_WEBHOOK_SECRET.length : 0);
-    
+
     try {
       const parts = signature.split(';');
       let ts = '', h1 = '';
@@ -765,8 +764,8 @@ app.post("/webhook/paddle", async (req, res) => {
       console.log("Expected Hash:", h1.substring(0, 8) + "...");
       console.log("Does Hash Match?", computed === h1);
       console.log("Time Difference (sec):", (new Date().getTime() / 1000) - parseInt(ts));
-    } catch (e) {}
-    
+    } catch (e) { }
+
     if (!req.rawBody) {
       console.error("rawBody is missing! Make sure express.json({ verify: ... }) is working.");
       return res.status(400).json({ error: "No raw body" });
@@ -782,7 +781,7 @@ app.post("/webhook/paddle", async (req, res) => {
 
     if (eventData.eventType === "transaction.completed") {
       const transaction = eventData.data;
-      const { user_id, package_id, credits } = 
+      const { user_id, package_id, credits } =
         transaction.customData || {};
 
       console.log("Transaction completed for user:", user_id);

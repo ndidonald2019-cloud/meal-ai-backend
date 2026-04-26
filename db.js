@@ -17,41 +17,83 @@ pool.query("SELECT NOW()").then(() => {
   console.error("❌ PostgreSQL connection failed:", err.message);
 });
 
-// Run DB schema if tables don't exist
+// ── SCHEMA INIT ───────────────────────────────
+// Detects old incompatible schema (INTEGER id) and drops/recreates.
+// Also adds missing columns (password, name) to existing tables.
 async function initSchema() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      name TEXT DEFAULT '',
-      email TEXT UNIQUE NOT NULL,
-      password TEXT,
-      credits INTEGER DEFAULT 400,
-      signup_bonus_given BOOLEAN DEFAULT true,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
+  try {
+    // Check if users table exists and what type id column is
+    const { rows: idRows } = await pool.query(`
+      SELECT data_type FROM information_schema.columns
+      WHERE table_name = 'users' AND column_name = 'id'
+    `);
+    const idType = idRows[0]?.data_type;
 
-    CREATE TABLE IF NOT EXISTS payments (
-      id SERIAL PRIMARY KEY,
-      user_id TEXT,
-      amount NUMERIC,
-      currency TEXT DEFAULT 'USD',
-      credits_added INTEGER,
-      package_id TEXT,
-      payment_gateway TEXT DEFAULT 'paddle',
-      payment_reference TEXT UNIQUE,
-      status TEXT DEFAULT 'pending',
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
+    // If id is not TEXT (e.g. old INTEGER), drop and recreate everything
+    if (idType && idType !== "text") {
+      console.log(`⚠️  Detected old users.id type='${idType}' — dropping old tables...`);
+      await pool.query("DROP TABLE IF EXISTS usage_logs CASCADE");
+      await pool.query("DROP TABLE IF EXISTS payments CASCADE");
+      await pool.query("DROP TABLE IF EXISTS users CASCADE");
+      console.log("🗑️  Old tables dropped. Recreating...");
+    }
 
-    CREATE TABLE IF NOT EXISTS usage_logs (
-      id SERIAL PRIMARY KEY,
-      user_id TEXT,
-      feature TEXT,
-      credits_used INTEGER,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
-  console.log("✅ Database schema ready");
+    // If table exists but missing columns, add them
+    const { rows: colRows } = await pool.query(`
+      SELECT column_name FROM information_schema.columns WHERE table_name = 'users'
+    `);
+    const cols = colRows.map(r => r.column_name);
+    if (cols.length > 0 && !cols.includes("password")) {
+      await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT");
+      console.log("✅ Added missing 'password' column");
+    }
+    if (cols.length > 0 && !cols.includes("name")) {
+      await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT DEFAULT ''");
+      console.log("✅ Added missing 'name' column");
+    }
+    if (cols.length > 0 && !cols.includes("signup_bonus_given")) {
+      await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_bonus_given BOOLEAN DEFAULT true");
+      console.log("✅ Added missing 'signup_bonus_given' column");
+    }
+
+    // Create tables with correct schema (skipped if already exists correctly)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        name TEXT DEFAULT '',
+        email TEXT UNIQUE NOT NULL,
+        password TEXT,
+        credits INTEGER DEFAULT 400,
+        signup_bonus_given BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS payments (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT,
+        amount NUMERIC,
+        currency TEXT DEFAULT 'USD',
+        credits_added INTEGER,
+        package_id TEXT,
+        payment_gateway TEXT DEFAULT 'paddle',
+        payment_reference TEXT UNIQUE,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS usage_logs (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT,
+        feature TEXT,
+        credits_used INTEGER,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+    console.log("✅ Database schema ready");
+  } catch (err) {
+    console.error("❌ initSchema failed:", err.message);
+    throw err;
+  }
 }
 
 // ── USER HELPERS ──────────────────────────────
