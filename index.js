@@ -163,10 +163,10 @@ const CREDIT_PACKAGES = {
 const CREDIT_COSTS = {
   cookWithIngredients: 5,
   generateWeeklyPlan: 15,
-  rescueLeftovers: 3,
+  rescueLeftovers: 5,
   getCookingSteps: 5,
-  budgetMeals: 5,
-  extractRecipe: 8,
+  budgetMeals: 7,
+  extractRecipe: 12,
 };
 
 const SIGNUP_BONUS_CREDITS = 10;
@@ -352,7 +352,7 @@ app.post("/cookWithIngredients", async (req, res) => {
     return res.status(400).json({ error: "ingredients required" });
 
   try {
-    const prompt = `You are a professional chef. Suggest 3 meals using these ingredients: ${ingredients.join(
+    const prompt = `You are a professional chef. Suggest 10 meals using these ingredients: ${ingredients.join(
       ", "
     )}. The style should match ${
       country || "global"
@@ -459,7 +459,7 @@ app.post("/rescueLeftovers", async (req, res) => {
     return res.status(400).json({ error: "leftovers required" });
 
   try {
-    const prompt = `You are a creative chef. Transform these leftovers: ${leftovers.join(", ")} into 3 new exciting meals. Style: ${country || "global"}. Return ONLY valid JSON: { "recipes": [{ "title": "", "description": "", "transformation_steps": [], "extra_ingredients": [], "cook_time": "", "wow_factor": "" }] }`;
+    const prompt = `You are a creative chef. Transform these leftovers: ${leftovers.join(", ")} into 10 new exciting meals. Style: ${country || "global"}. Return ONLY valid JSON: { "recipes": [{ "title": "", "description": "", "transformation_steps": [], "extra_ingredients": [], "cook_time": "", "wow_factor": "" }] }`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -628,7 +628,7 @@ app.post("/budgetMeals", async (req, res) => {
     return res.status(400).json({ error: "budget required" });
 
   try {
-    const prompt = `You are a budget cooking expert. Find 5 delicious meals under ${budget} ${currency || "USD"} for ${people_count || 1} person in ${country || "anywhere"}. Return ONLY valid JSON: { "budget_summary": { "budget": "", "per_person": "", "verdict": "" }, "meals": [{ "name": "", "cuisine": "", "estimated_cost": "", "servings": 2, "cost_per_person": "", "prep_time": "", "difficulty": "", "why_affordable": "", "money_saving_tip": "" }], "general_tips": [] }`;
+    const prompt = `You are a budget cooking expert. Find 6 delicious meals under ${budget} ${currency || "USD"} for ${people_count || 1} person in ${country || "anywhere"}. Return ONLY valid JSON: { "budget_summary": { "budget": "", "per_person": "", "verdict": "" }, "meals": [{ "name": "", "cuisine": "", "estimated_cost": "", "servings": 2, "cost_per_person": "", "prep_time": "", "difficulty": "", "why_affordable": "", "money_saving_tip": "" }], "general_tips": [] }`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
