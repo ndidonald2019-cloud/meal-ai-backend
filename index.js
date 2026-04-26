@@ -6,6 +6,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
 const { Paddle, Environment, EventName } = require("@paddle/paddle-node-sdk");
 const { WebhooksValidator } = require("@paddle/paddle-node-sdk/dist/cjs/notifications/helpers/webhooks-validator");
 require("dotenv").config();
@@ -193,12 +194,13 @@ function checkAndDeductCredits(userId, cost) {
 }
 
 // ═══════════════════════════════════════════
+// ═══════════════════════════════════════════
 // 🔒 AUTHENTICATION MIDDLEWARE
 // ═══════════════════════════════════════════
 const requireAuth = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "You must be logged in to purchase credits" });
+    return res.status(401).json({ error: "Unauthorized - Please log in" });
   }
 
   const token = authHeader.split(" ")[1];
@@ -207,9 +209,120 @@ const requireAuth = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (error) {
-    return res.status(401).json({ error: "You must be logged in to purchase credits" });
+    return res.status(401).json({ error: "Unauthorized - Session expired" });
   }
 };
+
+// ═══════════════════════════════════════════
+// 🔐 AUTHENTICATION ENDPOINTS
+// ═══════════════════════════════════════════
+
+// SIGNUP
+app.post("/auth/signup", async (req, res) => {
+  const { name, email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+
+  try {
+    const db = readDB();
+    
+    // Check if user exists
+    const userExists = Object.values(db.users).find(u => u.email === email);
+    if (userExists) {
+      return res.status(400).json({ error: "User already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const userId = crypto.randomUUID();
+
+    db.users[userId] = {
+      id: userId,
+      name: name || "",
+      email: email,
+      password: hashedPassword,
+      credits: SIGNUP_BONUS_CREDITS,
+      signup_bonus_given: true,
+      created_at: new Date().toISOString()
+    };
+
+    writeDB(db);
+
+    const token = jwt.sign({ id: userId, email: email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    res.status(201).json({
+      success: true,
+      token,
+      user: {
+        id: userId,
+        name: name || "",
+        email: email,
+        credits: SIGNUP_BONUS_CREDITS
+      }
+    });
+  } catch (error) {
+    console.error("Signup error:", error);
+    res.status(500).json({ error: "Server error during signup" });
+  }
+});
+
+// LOGIN
+app.post("/auth/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+
+  try {
+    const db = readDB();
+    const user = Object.values(db.users).find(u => u.email === email);
+
+    if (!user || !user.password) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+
+    const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name || "",
+        email: user.email,
+        credits: user.credits
+      }
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Server error during login" });
+  }
+});
+
+// GET ME
+app.get("/auth/me", requireAuth, (req, res) => {
+  const user = getUser(req.user.id);
+  if (!user) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  res.json({
+    success: true,
+    user: {
+      id: user.id,
+      name: user.name || "",
+      email: user.email,
+      credits: user.credits
+    }
+  });
+});
 
 // ═══════════════════════════════════════════
 // 🚫 RATE LIMITER
