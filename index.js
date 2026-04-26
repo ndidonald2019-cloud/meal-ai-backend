@@ -200,7 +200,7 @@ function checkAndDeductCredits(userId, cost) {
 const requireAuth = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Unauthorized - Please log in" });
+    return res.status(401).json({ error: "Sign up to buy credit" });
   }
 
   const token = authHeader.split(" ")[1];
@@ -209,7 +209,7 @@ const requireAuth = (req, res, next) => {
     req.user = decoded;
     next();
   } catch (error) {
-    return res.status(401).json({ error: "Unauthorized - Session expired" });
+    return res.status(401).json({ error: "Sign up to buy credit" });
   }
 };
 
