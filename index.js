@@ -9,12 +9,13 @@ const { Paddle, Environment, EventName } = require("@paddle/paddle-node-sdk");
 require("dotenv").config();
 
 const app = express();
+app.set("trust proxy", 1);
 
 // ═══════════════════════════════════════════
 // PADDLE SETUP
 // ═══════════════════════════════════════════
 const paddle = new Paddle(process.env.PADDLE_API_KEY, {
-  environment: Environment.Sandbox,
+  environment: Environment.sandbox,
   // Using Sandbox for testing
 });
 
