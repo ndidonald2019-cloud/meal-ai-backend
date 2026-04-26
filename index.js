@@ -91,7 +91,7 @@ function createUser(user_id, email) {
     db.users[user_id] = {
       id: user_id,
       email: email || "",
-      credits: 400,
+      credits: SIGNUP_BONUS_CREDITS,
       signup_bonus_given: false,
       created_at: new Date().toISOString(),
     };
@@ -171,7 +171,7 @@ const CREDIT_COSTS = {
   extractRecipe: 12,
 };
 
-const SIGNUP_BONUS_CREDITS = 10;
+const SIGNUP_BONUS_CREDITS = 400;
 
 // ═══════════════════════════════════════════
 // 🧠 CREDIT CHECKER
@@ -1250,6 +1250,59 @@ app.post("/createUser", async (req, res) => {
       credits: newUser.credits,
     },
   });
+});
+
+// VERIFY PAYMENT
+app.post("/verifyPayment", async (req, res) => {
+  const { user_id, package_id } = req.body;
+  if (!user_id) return res.status(400).json({ error: "user_id required" });
+
+  const db = readDB();
+  const payment = db.payments.find(p => p.user_id === user_id && p.status === "completed");
+  
+  res.json({
+    success: true,
+    paid: !!payment,
+    user: db.users[user_id]
+  });
+});
+
+// SIGNUP BONUS
+app.post("/signupBonus", async (req, res) => {
+  const { user_id, email } = req.body;
+  if (!user_id) return res.status(400).json({ error: "user_id required" });
+
+  const db = readDB();
+  const user = db.users[user_id];
+  
+  if (user && !user.signup_bonus_given) {
+    user.credits = (user.credits || 0) + SIGNUP_BONUS_CREDITS;
+    user.signup_bonus_given = true;
+    writeDB(db);
+    return res.json({ success: true, credits: user.credits, message: "Bonus added!" });
+  }
+
+  res.json({ success: false, message: "Bonus already claimed or user not found" });
+});
+
+// DEDUCT CREDITS (Legacy support)
+app.post("/deductCredits", async (req, res) => {
+  const { user_id, feature } = req.body;
+  const cost = CREDIT_COSTS[feature] || 5;
+  
+  const result = checkAndDeductCredits(user_id, cost);
+  if (result.error) return res.status(403).json({ error: result.error });
+
+  res.json({ success: true, remainingCredits: result.newCredits });
+});
+
+// CREATE USER
+app.post("/createUser", async (req, res) => {
+  const { user_id, email } = req.body;
+  if (!user_id) return res.status(400).json({ error: "user_id required" });
+
+  const user = createUser(user_id, email);
+  res.json({ success: true, user });
 });
 
 // ═══════════════════════════════════════════
