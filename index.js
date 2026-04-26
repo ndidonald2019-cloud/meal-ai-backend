@@ -82,7 +82,7 @@ const CREDIT_COSTS = {
   extractRecipe: 12,
 };
 
-const SIGNUP_BONUS_CREDITS = 400;
+const SIGNUP_BONUS_CREDITS = 12;
 
 // ═══════════════════════════════════════════
 // ═══════════════════════════════════════════

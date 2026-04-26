@@ -63,7 +63,7 @@ async function initSchema() {
         name TEXT DEFAULT '',
         email TEXT UNIQUE NOT NULL,
         password TEXT,
-        credits INTEGER DEFAULT 400,
+        credits INTEGER DEFAULT 12,
         signup_bonus_given BOOLEAN DEFAULT true,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -108,7 +108,7 @@ async function getUserByEmail(email) {
 }
 
 async function createUser(userId, email, extras = {}) {
-  const { name = "", password = null, credits = 400 } = extras;
+  const { name = "", password = null, credits = 12 } = extras;
   try {
     const { rows } = await pool.query(
       `INSERT INTO users (id, name, email, password, credits, signup_bonus_given)
