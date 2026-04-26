@@ -978,7 +978,7 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
-  console.log(`📁 Database: ${DB_FILE}`);
+  console.log(`🐘 Database: PostgreSQL`);
   console.log(`💳 Payment: Paddle`);
-  console.log(`🧪 Test mode: New users get 400 credits`);
+  console.log(`🎁 New users get ${SIGNUP_BONUS_CREDITS} credits on signup`);
 });
