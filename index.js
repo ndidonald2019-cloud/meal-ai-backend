@@ -510,7 +510,7 @@ app.post("/extractRecipe", async (req, res) => {
     return res.status(400).json({ error: "mealName required" });
 
   try {
-    const prompt = \`You are a professional chef. Provide a complete, detailed recipe based on this cooking video title: "\${mealName}". \${url ? \`Video URL context: \${url}.\` : ""} Return ONLY valid JSON: { "meal_name": "", "description": "", "cooking_time": "", "servings": 4, "difficulty": "", "ingredients": [{ "name": "", "local_name": "", "quantity": "", "notes": "" }], "steps": [{ "number": 1, "title": "", "instruction": "", "duration": "" }], "tips": [] }\`;
+    const prompt = `You are a professional chef. Provide a complete, detailed recipe based on this cooking video title: "${mealName}". ${url ? `Video URL context: ${url}.` : ""} Return ONLY valid JSON: { "meal_name": "", "description": "", "cooking_time": "", "servings": 4, "difficulty": "", "ingredients": [{ "name": "", "local_name": "", "quantity": "", "notes": "" }], "steps": [{ "number": 1, "title": "", "instruction": "", "duration": "" }], "tips": [] }`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -521,13 +521,13 @@ app.post("/extractRecipe", async (req, res) => {
       {
         headers: {
           "Content-Type": "application/json",
-          Authorization: \`Bearer \${process.env.OPENAI_API_KEY}\`,
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
         },
       }
     );
 
     const text = response.data.choices[0].message.content;
-    const jsonMatch = text.match(/\\{[\\s\\S]*\\}/);
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
     const user = getUser(userId);
     const parsed = JSON.parse(jsonMatch[0]);
 
