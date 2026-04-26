@@ -718,6 +718,11 @@ app.post("/webhook/paddle", async (req, res) => {
   }
 
   try {
+    console.log("--- WEBHOOK DEBUG ---");
+    console.log("Is body a buffer?", Buffer.isBuffer(req.body));
+    console.log("Body typeof:", typeof req.body);
+    console.log("Secret length:", process.env.PADDLE_WEBHOOK_SECRET ? process.env.PADDLE_WEBHOOK_SECRET.length : 0);
+    
     const eventData = await paddle.webhooks.unmarshal(
       req.body.toString(),
       process.env.PADDLE_WEBHOOK_SECRET,
