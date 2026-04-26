@@ -3,12 +3,11 @@ const axios = require("axios");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
 const { Paddle, Environment, EventName } = require("@paddle/paddle-node-sdk");
 const { WebhooksValidator } = require("@paddle/paddle-node-sdk/dist/cjs/notifications/helpers/webhooks-validator");
+const db = require("./db");
 require("dotenv").config();
 
 // Increase Paddle's extremely strict 5-second webhook tolerance to 5 minutes
@@ -42,96 +41,8 @@ app.use(express.json({
   }
 }));
 
-// ═══════════════════════════════════════════
-// JSON FILE DATABASE
-// ═══════════════════════════════════════════
-const DB_FILE = path.join(__dirname, "database.json");
-
-function initDatabase() {
-  if (!fs.existsSync(DB_FILE)) {
-    const emptyDB = {
-      users: {},
-      payments: [],
-      usage_logs: [],
-    };
-    fs.writeFileSync(DB_FILE, JSON.stringify(emptyDB, null, 2));
-    console.log("✅ Database file created");
-  }
-}
-
-function readDB() {
-  try {
-    initDatabase();
-    const data = fs.readFileSync(DB_FILE, "utf8");
-    return JSON.parse(data);
-  } catch (error) {
-    console.error("Error reading database:", error.message);
-    return { users: {}, payments: [], usage_logs: [] };
-  }
-}
-
-function writeDB(data) {
-  try {
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-    return true;
-  } catch (error) {
-    console.error("Error writing database:", error.message);
-    return false;
-  }
-}
-
-function getUser(user_id) {
-  const db = readDB();
-  return db.users[user_id] || null;
-}
-
-function createUser(user_id, email) {
-  const db = readDB();
-  if (!db.users[user_id]) {
-    db.users[user_id] = {
-      id: user_id,
-      email: email || "",
-      credits: SIGNUP_BONUS_CREDITS,
-      signup_bonus_given: false,
-      created_at: new Date().toISOString(),
-    };
-    writeDB(db);
-    console.log("New user created with 400 test credits:", user_id);
-  }
-  return db.users[user_id];
-}
-
-function updateUserCredits(user_id, newCredits) {
-  const db = readDB();
-  if (db.users[user_id]) {
-    db.users[user_id].credits = newCredits;
-    writeDB(db);
-    return true;
-  }
-  return false;
-}
-
-function savePayment(paymentData) {
-  const db = readDB();
-  db.payments.push({
-    ...paymentData,
-    created_at: new Date().toISOString(),
-  });
-  writeDB(db);
-}
-
-function saveUsageLog(user_id, feature, credits_used) {
-  const db = readDB();
-  db.usage_logs.push({
-    user_id,
-    feature,
-    credits_used,
-    created_at: new Date().toISOString(),
-  });
-  writeDB(db);
-}
-
-initDatabase();
+// PostgreSQL DB helpers are imported from ./db.js
+db.initSchema().catch(err => console.error("Schema init error:", err.message));
 
 // ═══════════════════════════════════════════
 // 💰 CREDIT PACKAGES WITH PADDLE PRICE IDS
@@ -174,26 +85,6 @@ const CREDIT_COSTS = {
 const SIGNUP_BONUS_CREDITS = 400;
 
 // ═══════════════════════════════════════════
-// 🧠 CREDIT CHECKER
-// ═══════════════════════════════════════════
-function checkAndDeductCredits(userId, cost) {
-  let db = readDB();
-  if (!db.users[userId]) {
-    createUser(userId, "");
-    db = readDB();
-  }
-
-  const user = db.users[userId];
-  if (!user) return { error: "User not found" };
-  if (user.credits < cost) return { error: "Not enough credits" };
-
-  const newCredits = user.credits - cost;
-  updateUserCredits(userId, newCredits);
-
-  return { success: true, remaining: newCredits };
-}
-
-// ═══════════════════════════════════════════
 // ═══════════════════════════════════════════
 // 🔒 AUTHENTICATION MIDDLEWARE
 // ═══════════════════════════════════════════
@@ -220,46 +111,21 @@ const requireAuth = (req, res, next) => {
 // SIGNUP
 app.post("/auth/signup", async (req, res) => {
   const { name, email, password } = req.body;
-  
-  if (!email || !password) {
+  if (!email || !password)
     return res.status(400).json({ error: "Email and password are required" });
-  }
 
   try {
-    const db = readDB();
-    
-    // Check if user exists
-    const userExists = Object.values(db.users).find(u => u.email === email);
-    if (userExists) {
-      return res.status(400).json({ error: "User already exists" });
-    }
+    const existing = await db.getUserByEmail(email);
+    if (existing) return res.status(400).json({ error: "Email already registered" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const userId = crypto.randomUUID();
+    const user = await db.createUser(userId, email, { name, password: hashedPassword, credits: SIGNUP_BONUS_CREDITS });
 
-    db.users[userId] = {
-      id: userId,
-      name: name || "",
-      email: email,
-      password: hashedPassword,
-      credits: SIGNUP_BONUS_CREDITS,
-      signup_bonus_given: true,
-      created_at: new Date().toISOString()
-    };
-
-    writeDB(db);
-
-    const token = jwt.sign({ id: userId, email: email }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
+    const token = jwt.sign({ id: userId, email }, process.env.JWT_SECRET, { expiresIn: "7d" });
     res.status(201).json({
-      success: true,
-      token,
-      user: {
-        id: userId,
-        name: name || "",
-        email: email,
-        credits: SIGNUP_BONUS_CREDITS
-      }
+      success: true, token,
+      user: { id: userId, name: name || "", email, credits: SIGNUP_BONUS_CREDITS }
     });
   } catch (error) {
     console.error("Signup error:", error);
@@ -270,35 +136,22 @@ app.post("/auth/signup", async (req, res) => {
 // LOGIN
 app.post("/auth/login", async (req, res) => {
   const { email, password } = req.body;
-
-  if (!email || !password) {
+  if (!email || !password)
     return res.status(400).json({ error: "Email and password are required" });
-  }
 
   try {
-    const db = readDB();
-    const user = Object.values(db.users).find(u => u.email === email);
-
-    if (!user || !user.password) {
+    const user = await db.getUserByEmail(email);
+    if (!user || !user.password)
       return res.status(401).json({ error: "Invalid email or password" });
-    }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
+    if (!isMatch)
       return res.status(401).json({ error: "Invalid email or password" });
-    }
 
-    const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
+    const token = jwt.sign({ id: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: "7d" });
     res.json({
-      success: true,
-      token,
-      user: {
-        id: user.id,
-        name: user.name || "",
-        email: user.email,
-        credits: user.credits
-      }
+      success: true, token,
+      user: { id: user.id, name: user.name || "", email: user.email, credits: user.credits }
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -307,21 +160,14 @@ app.post("/auth/login", async (req, res) => {
 });
 
 // GET ME
-app.get("/auth/me", requireAuth, (req, res) => {
-  const user = getUser(req.user.id);
-  if (!user) {
-    return res.status(404).json({ error: "User not found" });
+app.get("/auth/me", requireAuth, async (req, res) => {
+  try {
+    const user = await db.getUser(req.user.id);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json({ success: true, user: { id: user.id, name: user.name || "", email: user.email, credits: user.credits } });
+  } catch (error) {
+    res.status(500).json({ error: "Server error" });
   }
-
-  res.json({
-    success: true,
-    user: {
-      id: user.id,
-      name: user.name || "",
-      email: user.email,
-      credits: user.credits
-    }
-  });
 });
 
 // ═══════════════════════════════════════════
@@ -473,10 +319,7 @@ app.post("/cookWithIngredients", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
-    userId,
-    CREDIT_COSTS.cookWithIngredients
-  );
+  const creditCheck = await db.checkAndDeductCredits(userId, CREDIT_COSTS.cookWithIngredients);
   if (creditCheck.error)
     return res.status(403).json({ error: creditCheck.error });
 
@@ -509,7 +352,7 @@ app.post("/cookWithIngredients", async (req, res) => {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("AI did not return JSON.");
     const parsedData = JSON.parse(jsonMatch[0]);
-    const user = getUser(userId);
+    const user = await db.getUser(userId);
 
     res.json({
       success: true,
@@ -527,10 +370,7 @@ app.post("/cookWithIngredients", async (req, res) => {
 // ═══════════════════════════════════════════
 app.post("/generateWeeklyPlan", async (req, res) => {
   const userId = req.headers["userid"];
-  const creditCheck = checkAndDeductCredits(
-    userId,
-    CREDIT_COSTS.generateWeeklyPlan
-  );
+  const creditCheck = await db.checkAndDeductCredits(userId, CREDIT_COSTS.generateWeeklyPlan);
   if (creditCheck.error)
     return res.status(403).json({ error: creditCheck.error });
 
@@ -557,7 +397,7 @@ app.post("/generateWeeklyPlan", async (req, res) => {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error("AI did not return JSON.");
     const parsedData = JSON.parse(jsonMatch[0]);
-    const user = getUser(userId);
+    const user = await db.getUser(userId);
 
     res.json({
       success: true,
@@ -580,10 +420,7 @@ app.post("/rescueLeftovers", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
-    userId,
-    CREDIT_COSTS.rescueLeftovers
-  );
+  const creditCheck = await db.checkAndDeductCredits(userId, CREDIT_COSTS.rescueLeftovers);
   if (creditCheck.error)
     return res.status(403).json({ error: creditCheck.error });
 
@@ -610,7 +447,7 @@ app.post("/rescueLeftovers", async (req, res) => {
 
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const user = getUser(userId);
+    const user = await db.getUser(userId);
 
     res.json({
       success: true,
@@ -631,10 +468,7 @@ app.post("/extractRecipe", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
-    userId,
-    CREDIT_COSTS.extractRecipe
-  );
+  const creditCheck = await db.checkAndDeductCredits(userId, CREDIT_COSTS.extractRecipe);
   if (creditCheck.error)
     return res.status(403).json({ error: creditCheck.error });
 
@@ -661,7 +495,7 @@ app.post("/extractRecipe", async (req, res) => {
 
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const user = getUser(userId);
+    const user = await db.getUser(userId);
     const parsed = JSON.parse(jsonMatch[0]);
 
     res.json({
@@ -690,10 +524,7 @@ app.post("/getCookingSteps", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
-    userId,
-    CREDIT_COSTS.getCookingSteps
-  );
+  const creditCheck = await db.checkAndDeductCredits(userId, CREDIT_COSTS.getCookingSteps);
   if (creditCheck.error)
     return res.status(403).json({ error: creditCheck.error });
 
@@ -720,7 +551,7 @@ app.post("/getCookingSteps", async (req, res) => {
 
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const user = getUser(userId);
+    const user = await db.getUser(userId);
     const parsed = JSON.parse(jsonMatch[0]);
 
     res.json({
@@ -749,10 +580,7 @@ app.post("/budgetMeals", async (req, res) => {
   if (!userId)
     return res.status(401).json({ error: "User ID required" });
 
-  const creditCheck = checkAndDeductCredits(
-    userId,
-    CREDIT_COSTS.budgetMeals
-  );
+  const creditCheck = await db.checkAndDeductCredits(userId, CREDIT_COSTS.budgetMeals);
   if (creditCheck.error)
     return res.status(403).json({ error: creditCheck.error });
 
@@ -779,7 +607,7 @@ app.post("/budgetMeals", async (req, res) => {
 
     const text = response.data.choices[0].message.content;
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    const user = getUser(userId);
+    const user = await db.getUser(userId);
 
     res.json({
       success: true,
@@ -847,7 +675,7 @@ app.post("/createCheckout", requireAuth, async (req, res) => {
     });
   }
 
-  createUser(user_id, email);
+  await db.createUser(user_id, email);
 
   try {
     const transaction = await paddle.transactions.create({
@@ -878,7 +706,7 @@ app.post("/createCheckout", requireAuth, async (req, res) => {
       });
     }
 
-    savePayment({
+    await db.savePayment({
       user_id,
       amount: selectedPackage.price_usd,
       currency: "USD",
@@ -965,31 +793,26 @@ app.post("/webhook/paddle", async (req, res) => {
         return res.json({ received: true });
       }
 
-      const db = readDB();
       const transactionId = transaction.id;
-      const existingPayment = db.payments.find(
-        (p) =>
-          p.payment_reference === transactionId &&
-          p.status === "completed"
-      );
+      const existingPayment = await db.getCompletedPayment(transactionId);
 
       if (existingPayment) {
         console.log("Already processed:", transactionId);
         return res.json({ received: true });
       }
 
-      let user = getUser(user_id);
+      let user = await db.getUser(user_id);
       if (!user) {
-        createUser(user_id, "");
-        user = getUser(user_id);
+        await db.createUser(user_id, "");
+        user = await db.getUser(user_id);
       }
 
       const creditsToAdd = parseInt(credits);
       const newBalance = (user.credits || 0) + creditsToAdd;
 
-      updateUserCredits(user_id, newBalance);
+      await db.updateUserCredits(user_id, newBalance);
 
-      savePayment({
+      await db.savePayment({
         user_id,
         amount: transaction.details?.totals?.total / 100,
         currency: "USD",
@@ -1000,9 +823,9 @@ app.post("/webhook/paddle", async (req, res) => {
         status: "completed",
       });
 
-      saveUsageLog(user_id, "credit_purchase", -creditsToAdd);
+      await db.saveUsageLog(user_id, "credit_purchase", creditsToAdd);
 
-      console.log("✅ Payment processed!");
+      console.log("\u2705 Payment processed!");
       console.log(`User: ${user_id}`);
       console.log(`Credits added: ${creditsToAdd}`);
       console.log(`New balance: ${newBalance}`);
@@ -1010,14 +833,7 @@ app.post("/webhook/paddle", async (req, res) => {
 
     if (eventData.eventType === "transaction.payment_failed") {
       const transaction = eventData.data;
-      const db = readDB();
-      const payment = db.payments.find(
-        p => p.payment_reference === transaction.id
-      );
-      if (payment) {
-        payment.status = "failed";
-        writeDB(db);
-      }
+      await db.savePayment({ payment_reference: transaction.id, status: "failed", user_id: transaction.customData?.user_id || "", amount: 0, credits_added: 0, package_id: "" });
       console.log("Payment failed:", transaction.id);
     }
 
@@ -1033,74 +849,15 @@ app.post("/webhook/paddle", async (req, res) => {
 // ═══════════════════════════════════════════
 app.post("/verifyPayment", async (req, res) => {
   const { transaction_id, user_id, package_id } = req.body;
-
-  if (!user_id) {
-    return res.status(400).json({ error: "user_id required" });
-  }
+  if (!user_id) return res.status(400).json({ error: "user_id required" });
 
   try {
-    const db = readDB();
-    const completedPayment = db.payments.find(
-      (p) => p.user_id === user_id && p.status === "completed"
-    );
-
+    const completedPayment = await db.getLatestCompletedPayment(user_id);
     if (completedPayment) {
-      const user = getUser(user_id);
-      return res.json({
-        success: true,
-        verified: true,
-        credits_added: completedPayment.credits_added,
-        current_balance: user ? user.credits : 0,
-      });
+      const user = await db.getUser(user_id);
+      return res.json({ success: true, verified: true, credits_added: completedPayment.credits_added, current_balance: user ? user.credits : 0 });
     }
-
-    if (transaction_id) {
-      const transaction = await paddle.transactions.get(
-        transaction_id
-      );
-
-      if (transaction.status === "completed") {
-        const pkg = CREDIT_PACKAGES[package_id];
-        if (!pkg) {
-          return res.status(400).json({ 
-            error: "Package not found" 
-          });
-        }
-
-        let user = getUser(user_id);
-        if (!user) {
-          createUser(user_id, "");
-          user = getUser(user_id);
-        }
-
-        const newBalance = (user.credits || 0) + pkg.credits;
-        updateUserCredits(user_id, newBalance);
-
-        savePayment({
-          user_id,
-          amount: pkg.price_usd,
-          currency: "USD",
-          credits_added: pkg.credits,
-          package_id,
-          payment_gateway: "paddle",
-          payment_reference: transaction_id,
-          status: "completed",
-        });
-
-        return res.json({
-          success: true,
-          verified: true,
-          credits_added: pkg.credits,
-          new_balance: newBalance,
-        });
-      }
-    }
-
-    res.json({
-      success: false,
-      verified: false,
-      message: "Payment not confirmed yet. Please wait...",
-    });
+    res.json({ success: false, verified: false, message: "Payment not confirmed yet. Please wait..." });
   } catch (error) {
     console.error("verifyPayment error:", error.message);
     res.status(500).json({ error: "Failed to verify payment" });
@@ -1112,24 +869,24 @@ app.post("/verifyPayment", async (req, res) => {
 // ═══════════════════════════════════════════
 app.get("/creditBalance", async (req, res) => {
   const user_id = req.headers["userid"] || req.query.user_id;
+  if (!user_id) return res.status(401).json({ error: "User ID required" });
 
-  if (!user_id) {
-    return res.status(401).json({ error: "User ID required" });
+  try {
+    let user = await db.getUser(user_id);
+    if (!user) {
+      await db.createUser(user_id, "");
+      user = await db.getUser(user_id);
+    }
+    res.json({
+      success: true,
+      credits: user.credits,
+      low_balance: user.credits <= 15,
+      critical_balance: user.credits <= 8,
+      empty: user.credits <= 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
   }
-
-  let user = getUser(user_id);
-  if (!user) {
-    createUser(user_id, "");
-    user = getUser(user_id);
-  }
-
-  res.json({
-    success: true,
-    credits: user.credits,
-    low_balance: user.credits <= 15,
-    critical_balance: user.credits <= 8,
-    empty: user.credits <= 0,
-  });
 });
 
 // ═══════════════════════════════════════════
@@ -1137,48 +894,32 @@ app.get("/creditBalance", async (req, res) => {
 // ═══════════════════════════════════════════
 app.post("/deductCredits", async (req, res) => {
   const { user_id, feature } = req.body;
-
-  if (!user_id || !feature) {
-    return res.status(400).json({
-      error: "user_id and feature required",
-    });
-  }
+  if (!user_id || !feature) return res.status(400).json({ error: "user_id and feature required" });
 
   const cost = CREDIT_COSTS[feature];
-  if (!cost) {
-    return res.status(400).json({ 
-      error: "Invalid feature name" 
-    });
+  if (!cost) return res.status(400).json({ error: "Invalid feature name" });
+
+  try {
+    let user = await db.getUser(user_id);
+    if (!user) {
+      await db.createUser(user_id, "");
+      user = await db.getUser(user_id);
+    }
+    if (user.credits < cost) {
+      return res.status(403).json({
+        error: "insufficient_credits",
+        message: `You need ${cost} credits. You have ${user.credits}.`,
+        credits_needed: cost, credits_available: user.credits,
+        credits_short: cost - user.credits, show_paywall: true,
+      });
+    }
+    const newBalance = user.credits - cost;
+    await db.updateUserCredits(user_id, newBalance);
+    await db.saveUsageLog(user_id, feature, cost);
+    res.json({ success: true, credits_used: cost, credits_remaining: newBalance, low_balance: newBalance <= 15, critical_balance: newBalance <= 8 });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
   }
-
-  let user = getUser(user_id);
-  if (!user) {
-    createUser(user_id, "");
-    user = getUser(user_id);
-  }
-
-  if (user.credits < cost) {
-    return res.status(403).json({
-      error: "insufficient_credits",
-      message: `You need ${cost} credits. You have ${user.credits}.`,
-      credits_needed: cost,
-      credits_available: user.credits,
-      credits_short: cost - user.credits,
-      show_paywall: true,
-    });
-  }
-
-  const newBalance = user.credits - cost;
-  updateUserCredits(user_id, newBalance);
-  saveUsageLog(user_id, feature, cost);
-
-  res.json({
-    success: true,
-    credits_used: cost,
-    credits_remaining: newBalance,
-    low_balance: newBalance <= 15,
-    critical_balance: newBalance <= 8,
-  });
 });
 
 // ═══════════════════════════════════════════
@@ -1186,151 +927,19 @@ app.post("/deductCredits", async (req, res) => {
 // ═══════════════════════════════════════════
 app.post("/signupBonus", async (req, res) => {
   const { user_id, email } = req.body;
-
-  if (!user_id) {
-    return res.status(400).json({ error: "user_id required" });
-  }
-
-  createUser(user_id, email || "");
-  const user = getUser(user_id);
-
-  if (user.signup_bonus_given) {
-    return res.status(400).json({
-      error: "Signup bonus already claimed",
-    });
-  }
-
-  const newBalance = (user.credits || 0) + SIGNUP_BONUS_CREDITS;
-  updateUserCredits(user_id, newBalance);
-
-  const db = readDB();
-  db.users[user_id].signup_bonus_given = true;
-  writeDB(db);
-
-  console.log(`🎁 Signup bonus given to ${user_id}`);
-
-  res.json({
-    success: true,
-    credits_added: SIGNUP_BONUS_CREDITS,
-    new_balance: newBalance,
-    message: `🎁 ${SIGNUP_BONUS_CREDITS} free credits added!`,
-  });
-});
-
-// ═══════════════════════════════════════════
-// ✅ CREATE USER
-// ═══════════════════════════════════════════
-app.post("/createUser", async (req, res) => {
-  const { user_id, email } = req.body;
-
-  if (!user_id) {
-    return res.status(400).json({ error: "user_id required" });
-  }
-
-  const existingUser = getUser(user_id);
-  if (existingUser) {
-    return res.json({
-      success: true,
-      message: "User already exists",
-      user: {
-        id: existingUser.id,
-        credits: existingUser.credits,
-      },
-    });
-  }
-
-  createUser(user_id, email || "");
-  const newUser = getUser(user_id);
-
-  res.json({
-    success: true,
-    message: "User created with 400 test credits",
-    user: {
-      id: newUser.id,
-      credits: newUser.credits,
-    },
-  });
-});
-
-// VERIFY PAYMENT
-app.post("/verifyPayment", async (req, res) => {
-  const { user_id, package_id } = req.body;
   if (!user_id) return res.status(400).json({ error: "user_id required" });
-
-  const db = readDB();
-  const payment = db.payments.find(p => p.user_id === user_id && p.status === "completed");
-  
-  res.json({
-    success: true,
-    paid: !!payment,
-    user: db.users[user_id]
-  });
+  res.json({ success: true, message: "Credits already granted on signup" });
 });
 
-// SIGNUP BONUS
-app.post("/signupBonus", async (req, res) => {
-  const { user_id, email } = req.body;
-  if (!user_id) return res.status(400).json({ error: "user_id required" });
-
-  const db = readDB();
-  const user = db.users[user_id];
-  
-  if (user && !user.signup_bonus_given) {
-    user.credits = (user.credits || 0) + SIGNUP_BONUS_CREDITS;
-    user.signup_bonus_given = true;
-    writeDB(db);
-    return res.json({ success: true, credits: user.credits, message: "Bonus added!" });
-  }
-
-  res.json({ success: false, message: "Bonus already claimed or user not found" });
-});
-
-// DEDUCT CREDITS (Legacy support)
-app.post("/deductCredits", async (req, res) => {
-  const { user_id, feature } = req.body;
-  const cost = CREDIT_COSTS[feature] || 5;
-  
-  const result = checkAndDeductCredits(user_id, cost);
-  if (result.error) return res.status(403).json({ error: result.error });
-
-  res.json({ success: true, remainingCredits: result.newCredits });
-});
-
-// CREATE USER
 app.post("/createUser", async (req, res) => {
   const { user_id, email } = req.body;
   if (!user_id) return res.status(400).json({ error: "user_id required" });
-
-  const user = createUser(user_id, email);
-  res.json({ success: true, user });
-});
-
-// ═══════════════════════════════════════════
-// ✅ ADD TEST CREDITS
-// ═══════════════════════════════════════════
-app.post("/addTestCredits", async (req, res) => {
-  const { user_id, amount } = req.body;
-
-  if (!user_id) {
-    return res.status(400).json({ error: "user_id required" });
+  try {
+    const user = await db.createUser(user_id, email || "");
+    res.json({ success: true, user });
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
   }
-
-  let user = getUser(user_id);
-  if (!user) {
-    createUser(user_id, "");
-    user = getUser(user_id);
-  }
-
-  const creditsToAdd = amount || 400;
-  const newBalance = (user.credits || 0) + creditsToAdd;
-  updateUserCredits(user_id, newBalance);
-
-  res.json({
-    success: true,
-    credits_added: creditsToAdd,
-    new_balance: newBalance,
-    message: `${creditsToAdd} test credits added`,
-  });
 });
 
 // ═══════════════════════════════════════════
