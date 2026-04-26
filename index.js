@@ -197,6 +197,57 @@ app.use(limiter);
 const PORT = process.env.PORT || 3000;
 
 // ═══════════════════════════════════════════
+// 🛒 HOSTED CHECKOUT PAGE
+// ═══════════════════════════════════════════
+app.get("/checkout", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Secure Checkout</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+        <style>
+          body { 
+            margin: 0; padding: 0; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #f4f4f5; 
+            display: flex; flex-direction: column; align-items: center; justify-content: center; 
+            height: 100vh; text-align: center;
+          }
+          .loader {
+            border: 4px solid #e4e4e7;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px; height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+          }
+          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+          h2 { color: #18181b; margin: 0 0 8px 0; }
+          p { color: #71717a; margin: 0; }
+        </style>
+      </head>
+      <body>
+        <div class="loader"></div>
+        <h2>Loading Checkout</h2>
+        <p>Please wait while we secure your session...</p>
+        
+        <script>
+          // Initialize Paddle for Sandbox
+          Paddle.Environment.set('sandbox');
+          Paddle.Initialize({
+            token: '${process.env.PADDLE_CLIENT_TOKEN}' // Ensure this is set in Railway!
+          });
+          // Paddle.js will automatically detect the ?_ptxn parameter in the URL
+          // and open the checkout overlay instantly!
+        </script>
+      </body>
+    </html>
+  `);
+});
+
+// ═══════════════════════════════════════════
 // 🔍 YOUTUBE SEARCH
 // ═══════════════════════════════════════════
 app.get("/searchVideos", async (req, res) => {
