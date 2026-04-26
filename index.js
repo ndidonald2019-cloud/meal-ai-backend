@@ -6,7 +6,13 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { Paddle, Environment, EventName } = require("@paddle/paddle-node-sdk");
+const { WebhooksValidator } = require("@paddle/paddle-node-sdk/dist/cjs/notifications/helpers/webhooks-validator");
 require("dotenv").config();
+
+// Increase Paddle's extremely strict 5-second webhook tolerance to 5 minutes
+if (WebhooksValidator) {
+  WebhooksValidator.MAX_VALID_TIME_DIFFERENCE = 300; 
+}
 
 const app = express();
 app.set("trust proxy", 1);
@@ -722,6 +728,23 @@ app.post("/webhook/paddle", async (req, res) => {
     console.log("--- WEBHOOK DEBUG ---");
     console.log("Has rawBody?", !!req.rawBody);
     console.log("Secret length:", process.env.PADDLE_WEBHOOK_SECRET ? process.env.PADDLE_WEBHOOK_SECRET.length : 0);
+    
+    try {
+      const parts = signature.split(';');
+      let ts = '', h1 = '';
+      for (const part of parts) {
+        const [k, v] = part.split('=');
+        if (k === 'ts') ts = v;
+        if (k === 'h1') h1 = v;
+      }
+      const hmac = crypto.createHmac('sha256', process.env.PADDLE_WEBHOOK_SECRET);
+      hmac.update(`${ts}:${req.rawBody}`);
+      const computed = hmac.digest('hex');
+      console.log("Computed Hash:", computed.substring(0, 8) + "...");
+      console.log("Expected Hash:", h1.substring(0, 8) + "...");
+      console.log("Does Hash Match?", computed === h1);
+      console.log("Time Difference (sec):", (new Date().getTime() / 1000) - parseInt(ts));
+    } catch (e) {}
     
     if (!req.rawBody) {
       console.error("rawBody is missing! Make sure express.json({ verify: ... }) is working.");
