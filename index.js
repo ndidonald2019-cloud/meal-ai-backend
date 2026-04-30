@@ -251,7 +251,7 @@ app.get("/searchVideos", async (req, res) => {
         params: {
           part: "snippet",
           q: `how to cook ${meal} recipe`,
-          maxResults: 20,
+          maxResults: 50,
           type: "video",
           videoEmbeddable: "true",
           videoSyndicated: "true",
@@ -262,7 +262,7 @@ app.get("/searchVideos", async (req, res) => {
 
     const videos = response.data.items
       .filter((item) => item.id?.videoId)
-      .slice(0, 15)
+      .slice(0, 30)
       .map((item) => ({
         videoId: item.id.videoId,
         title: item.snippet.title,
