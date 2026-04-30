@@ -1754,8 +1754,9 @@ app.post("/createUser", async (req, res) => {
 // ═══════════════════════════════════════════
 // 📧 TEST EMAIL ENDPOINT
 // ═══════════════════════════════════════════
-app.post("/testEmail", async (req, res) => {
-  const { email, type } = req.body;
+app.all("/testEmail", async (req, res) => {
+  const email = req.body.email || req.query.email;
+  const type = req.body.type || req.query.type;
 
   if (!email) {
     return res.status(400).json({ 
