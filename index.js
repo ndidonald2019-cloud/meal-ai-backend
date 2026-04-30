@@ -27,6 +27,480 @@ const paddle = new Paddle(process.env.PADDLE_API_KEY, {
 });
 
 // ═══════════════════════════════════════════
+// RESEND EMAIL SETUP
+// ═══════════════════════════════════════════
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// ═══════════════════════════════════════════
+// EMAIL HELPER FUNCTIONS
+// ═══════════════════════════════════════════
+
+async function sendWelcomeEmail(email, name) {
+  try {
+    // Fire and forget (no await if we want to run in background, but the user requested try/catch around the call, so we await the call to resend but we don't await the helper function in the endpoints)
+    await resend.emails.send({
+      from: 'CookAndEatHealthy <noreply@cookandeathealthy.com>',
+      to: email,
+      subject: '🍳 Welcome to CookAndEatHealthy!',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { 
+              font-family: Inter, sans-serif; 
+              background: #1A0A0A; 
+              color: #F5ECD7;
+              margin: 0;
+              padding: 0;
+            }
+            .container {
+              max-width: 600px;
+              margin: 0 auto;
+              padding: 40px 20px;
+            }
+            .header {
+              text-align: center;
+              padding: 40px 0;
+              border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+            .logo {
+              font-size: 28px;
+              font-weight: 800;
+              color: #E8A020;
+            }
+            .content { padding: 40px 0; }
+            .greeting {
+              font-size: 24px;
+              font-weight: 700;
+              color: #F5ECD7;
+              margin-bottom: 16px;
+            }
+            .text {
+              font-size: 16px;
+              color: #D4B8A0;
+              line-height: 1.7;
+              margin-bottom: 16px;
+            }
+            .credits-box {
+              background: rgba(232,160,32,0.15);
+              border: 1px solid rgba(232,160,32,0.30);
+              border-radius: 12px;
+              padding: 24px;
+              text-align: center;
+              margin: 24px 0;
+            }
+            .credits-number {
+              font-size: 48px;
+              font-weight: 800;
+              color: #E8A020;
+            }
+            .credits-label {
+              font-size: 16px;
+              color: #D4B8A0;
+            }
+            .button {
+              display: inline-block;
+              background: #E8A020;
+              color: #1A0A0A;
+              font-weight: 700;
+              font-size: 16px;
+              padding: 16px 32px;
+              border-radius: 12px;
+              text-decoration: none;
+              margin: 24px 0;
+            }
+            .feature-item {
+              padding: 12px 0;
+              border-bottom: 1px solid rgba(255,255,255,0.06);
+              font-size: 15px;
+              color: #D4B8A0;
+            }
+            .footer {
+              text-align: center;
+              padding: 24px 0;
+              border-top: 1px solid rgba(255,255,255,0.1);
+              font-size: 13px;
+              color: #9A7A6A;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="logo">🍳 CookAndEatHealthy</div>
+            </div>
+            <div class="content">
+              <div class="greeting">
+                Welcome ${name || 'Chef'}! 👋
+              </div>
+              <p class="text">
+                You have successfully joined CookAndEatHealthy.
+                Your personal AI cooking assistant is ready.
+                We are excited to help you discover amazing 
+                meals from around the world.
+              </p>
+              <div class="credits-box">
+                <div class="credits-number">10 🪙</div>
+                <div class="credits-label">
+                  Free credits added to your account
+                </div>
+              </div>
+              <p class="text">
+                Use your free credits to explore:
+              </p>
+              <div class="feature-item">
+                🥘 Cook With Ingredients — 5 credits
+              </div>
+              <div class="feature-item">
+                🍱 Leftover Rescue — 3 credits
+              </div>
+              <div class="feature-item">
+                💰 Budget Meals — 5 credits
+              </div>
+              <div class="feature-item">
+                📖 Recipe Extraction — 5 credits
+              </div>
+              <div class="feature-item">
+                🤖 Weekly Meal Plan — 15 credits
+              </div>
+              <div style="text-align:center;">
+                <a href="https://cookandeathealthy.com" 
+                   class="button">
+                  Start Cooking Now →
+                </a>
+              </div>
+              <p class="text">
+                Need help? Contact us at
+                support@cookandeathealthy.com
+              </p>
+            </div>
+            <div class="footer">
+              © 2026 CookAndEatHealthy. All rights reserved.
+              <br>cookandeathealthy.com
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    });
+    console.log('✅ Welcome email sent to:', email);
+    return true;
+  } catch (error) {
+    console.error('Welcome email error:', error.message);
+    return false;
+  }
+}
+
+async function sendCreditPurchaseEmail(email, name, credits, amount, newBalance) {
+  try {
+    await resend.emails.send({
+      from: 'CookAndEatHealthy <noreply@cookandeathealthy.com>',
+      to: email,
+      subject: \`✅ \${credits} Credits Added to Your Account\`,
+      html: \`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { 
+              font-family: Inter, sans-serif;
+              background: #1A0A0A;
+              color: #F5ECD7;
+              margin: 0;
+              padding: 0;
+            }
+            .container {
+              max-width: 600px;
+              margin: 0 auto;
+              padding: 40px 20px;
+            }
+            .logo {
+              font-size: 28px;
+              font-weight: 800;
+              color: #E8A020;
+              text-align: center;
+              padding: 30px 0;
+              border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+            .success-box {
+              background: rgba(232,160,32,0.15);
+              border: 1px solid rgba(232,160,32,0.30);
+              border-radius: 12px;
+              padding: 32px;
+              text-align: center;
+              margin: 32px 0;
+            }
+            .checkmark { font-size: 48px; }
+            .success-title {
+              font-size: 24px;
+              font-weight: 700;
+              color: #F5ECD7;
+              margin: 16px 0 8px;
+            }
+            .credits-added {
+              font-size: 36px;
+              font-weight: 800;
+              color: #E8A020;
+            }
+            .details-box {
+              background: rgba(255,255,255,0.04);
+              border: 1px solid rgba(255,255,255,0.08);
+              border-radius: 12px;
+              padding: 24px;
+              margin: 24px 0;
+            }
+            .detail-row {
+              display: flex;
+              justify-content: space-between;
+              padding: 12px 0;
+              border-bottom: 1px solid rgba(255,255,255,0.06);
+              font-size: 15px;
+              color: #D4B8A0;
+            }
+            .detail-value {
+              color: #F5ECD7;
+              font-weight: 600;
+            }
+            .button {
+              display: block;
+              background: #E8A020;
+              color: #1A0A0A;
+              font-weight: 700;
+              font-size: 16px;
+              padding: 16px 32px;
+              border-radius: 12px;
+              text-decoration: none;
+              text-align: center;
+              margin: 24px 0;
+            }
+            .footer {
+              text-align: center;
+              padding: 24px 0;
+              border-top: 1px solid rgba(255,255,255,0.1);
+              font-size: 13px;
+              color: #9A7A6A;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">🍳 CookAndEatHealthy</div>
+            <div class="success-box">
+              <div class="checkmark">✅</div>
+              <div class="success-title">
+                Payment Successful!
+              </div>
+              <div class="credits-added">
+                +\${credits} Credits Added
+              </div>
+            </div>
+            <div class="details-box">
+              <div class="detail-row">
+                <span>Credits purchased</span>
+                <span class="detail-value">\${credits} 🪙</span>
+              </div>
+              <div class="detail-row">
+                <span>Amount paid</span>
+                <span class="detail-value">$\${amount}</span>
+              </div>
+              <div class="detail-row">
+                <span>New balance</span>
+                <span class="detail-value">\${newBalance} 🪙</span>
+              </div>
+              <div class="detail-row">
+                <span>Date</span>
+                <span class="detail-value">
+                  \${new Date().toLocaleDateString()}
+                </span>
+              </div>
+            </div>
+            <a href="https://cookandeathealthy.com" 
+               class="button">
+              Start Using Your Credits →
+            </a>
+            <div class="footer">
+              © 2026 CookAndEatHealthy
+              <br>Questions? support@cookandeathealthy.com
+            </div>
+          </div>
+        </body>
+        </html>
+      \`
+    });
+    console.log('✅ Purchase email sent to:', email);
+    return true;
+  } catch (error) {
+    console.error('Purchase email error:', error.message);
+    return false;
+  }
+}
+
+async function sendLowBalanceEmail(email, name, credits) {
+  try {
+    await resend.emails.send({
+      from: 'CookAndEatHealthy <noreply@cookandeathealthy.com>',
+      to: email,
+      subject: '⚠️ You are running low on credits',
+      html: \`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body {
+              font-family: Inter, sans-serif;
+              background: #1A0A0A;
+              color: #F5ECD7;
+              margin: 0;
+              padding: 0;
+            }
+            .container {
+              max-width: 600px;
+              margin: 0 auto;
+              padding: 40px 20px;
+            }
+            .logo {
+              font-size: 28px;
+              font-weight: 800;
+              color: #E8A020;
+              text-align: center;
+              padding: 30px 0;
+              border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+            .warning-box {
+              background: rgba(224,120,32,0.15);
+              border: 1px solid rgba(224,120,32,0.40);
+              border-radius: 12px;
+              padding: 32px;
+              text-align: center;
+              margin: 24px 0;
+            }
+            .warning-icon { font-size: 48px; }
+            .warning-title {
+              font-size: 22px;
+              font-weight: 700;
+              color: #F5ECD7;
+              margin: 16px 0 8px;
+            }
+            .credits-left {
+              font-size: 36px;
+              font-weight: 800;
+              color: #E07820;
+            }
+            .text {
+              font-size: 16px;
+              color: #D4B8A0;
+              line-height: 1.7;
+              margin: 16px 0;
+            }
+            .package-card {
+              background: rgba(255,255,255,0.04);
+              border: 1px solid rgba(255,255,255,0.08);
+              border-radius: 12px;
+              padding: 20px 24px;
+              margin: 12px 0;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .package-name {
+              font-weight: 600;
+              color: #F5ECD7;
+              font-size: 16px;
+            }
+            .package-price {
+              color: #9A7A6A;
+              font-size: 14px;
+              margin-top: 4px;
+            }
+            .package-credits {
+              color: #E8A020;
+              font-weight: 700;
+              font-size: 18px;
+            }
+            .button {
+              display: block;
+              background: #E8A020;
+              color: #1A0A0A;
+              font-weight: 700;
+              font-size: 16px;
+              padding: 16px 32px;
+              border-radius: 12px;
+              text-decoration: none;
+              text-align: center;
+              margin: 24px 0;
+            }
+            .footer {
+              text-align: center;
+              padding: 24px 0;
+              border-top: 1px solid rgba(255,255,255,0.1);
+              font-size: 13px;
+              color: #9A7A6A;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="logo">🍳 CookAndEatHealthy</div>
+            <div class="warning-box">
+              <div class="warning-icon">⚠️</div>
+              <div class="warning-title">
+                Running Low on Credits
+              </div>
+              <div class="credits-left">
+                \${credits} credits left
+              </div>
+            </div>
+            <p class="text">
+              Hey \${name || 'Chef'}, you are almost out 
+              of credits. Top up now to keep enjoying 
+              AI-powered cooking features.
+            </p>
+            <div class="package-card">
+              <div>
+                <div class="package-name">Starter Pack</div>
+                <div class="package-price">$2.99</div>
+              </div>
+              <div class="package-credits">50 🪙</div>
+            </div>
+            <div class="package-card">
+              <div>
+                <div class="package-name">Popular Pack</div>
+                <div class="package-price">$6.99</div>
+              </div>
+              <div class="package-credits">150 🪙</div>
+            </div>
+            <div class="package-card">
+              <div>
+                <div class="package-name">Pro Pack</div>
+                <div class="package-price">$14.99</div>
+              </div>
+              <div class="package-credits">400 🪙</div>
+            </div>
+            <a href="https://cookandeathealthy.com/pricing" 
+               class="button">
+              Top Up Credits Now →
+            </a>
+            <div class="footer">
+              © 2026 CookAndEatHealthy
+              <br>cookandeathealthy.com
+            </div>
+          </div>
+        </body>
+        </html>
+      \`
+    });
+    console.log('✅ Low balance email sent to:', email);
+    return true;
+  } catch (error) {
+    console.error('Low balance email error:', error.message);
+    return false;
+  }
+}
+
+
+// ═══════════════════════════════════════════
 // WEBHOOK MUST COME BEFORE express.json()
 // ═══════════════════════════════════════════
 // (Webhook raw parsing is now handled by express.json's verify function)
@@ -1114,6 +1588,18 @@ app.post("/webhook/paddle", async (req, res) => {
       console.log(`User: ${user_id}`);
       console.log(`Credits added: ${creditsToAdd}`);
       console.log(`New balance: ${newBalance}`);
+
+      // SEND PURCHASE EMAIL (Fire and forget)
+      const userForEmail = await db.getUser(user_id);
+      if (userForEmail && userForEmail.email) {
+        sendCreditPurchaseEmail(
+          userForEmail.email,
+          userForEmail.name || 'Chef',
+          creditsToAdd,
+          (transaction.details?.totals?.total / 100) || 0,
+          newBalance
+        );
+      }
     }
 
     if (eventData.eventType === "transaction.payment_failed") {
@@ -1201,6 +1687,19 @@ app.post("/deductCredits", async (req, res) => {
     const newBalance = user.credits - cost;
     await db.updateUserCredits(user_id, newBalance);
     await db.saveUsageLog(user_id, feature, cost);
+
+    // SEND LOW BALANCE EMAIL (Fire and forget)
+    if (newBalance <= 10 && newBalance > 0) {
+      const userForEmail = await db.getUser(user_id);
+      if (userForEmail && userForEmail.email) {
+        sendLowBalanceEmail(
+          userForEmail.email,
+          userForEmail.name || 'Chef',
+          newBalance
+        );
+      }
+    }
+
     res.json({ success: true, credits_used: cost, credits_remaining: newBalance, low_balance: newBalance <= 15, critical_balance: newBalance <= 8 });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
@@ -1211,19 +1710,87 @@ app.post("/deductCredits", async (req, res) => {
 // ✅ SIGNUP BONUS
 // ═══════════════════════════════════════════
 app.post("/signupBonus", async (req, res) => {
-  const { user_id, email } = req.body;
+  const { user_id, email, name } = req.body;
   if (!user_id) return res.status(400).json({ error: "user_id required" });
+  
+  if (email) {
+    sendWelcomeEmail(email, name || 'Chef');
+  }
+  
   res.json({ success: true, message: "Credits already granted on signup" });
 });
 
 app.post("/createUser", async (req, res) => {
-  const { user_id, email } = req.body;
+  const { user_id, email, name } = req.body;
   if (!user_id) return res.status(400).json({ error: "user_id required" });
+  
   try {
-    const user = await db.createUser(user_id, email || "");
-    res.json({ success: true, user });
+    const existingUser = await db.getUser(user_id);
+    if (existingUser) {
+      return res.json({
+        success: true,
+        message: "User already exists",
+        user: {
+          id: existingUser.id,
+          credits: existingUser.credits,
+        },
+      });
+    }
+
+    const user = await db.createUser(user_id, email || "", { name: name || "" });
+    res.json({
+      success: true,
+      message: "User created successfully",
+      user: {
+        id: user.id,
+        credits: user.credits,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// ═══════════════════════════════════════════
+// 📧 TEST EMAIL ENDPOINT
+// ═══════════════════════════════════════════
+app.post("/testEmail", async (req, res) => {
+  const { email, type } = req.body;
+
+  if (!email) {
+    return res.status(400).json({ 
+      error: "email required" 
+    });
+  }
+
+  try {
+    let result = false;
+
+    if (type === 'welcome') {
+      result = await sendWelcomeEmail(email, 'Test User');
+    } else if (type === 'purchase') {
+      result = await sendCreditPurchaseEmail(
+        email, 'Test User', 150, 6.99, 550
+      );
+    } else if (type === 'lowbalance') {
+      result = await sendLowBalanceEmail(
+        email, 'Test User', 8
+      );
+    } else {
+      result = await sendWelcomeEmail(email, 'Test User');
+    }
+
+    res.json({
+      success: result,
+      message: result 
+        ? 'Email sent successfully' 
+        : 'Email failed to send'
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      error: 'Failed to send test email',
+      message: error.message
+    });
   }
 });
 
