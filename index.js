@@ -926,9 +926,16 @@ app.post("/createCheckout", requireAuth, async (req, res) => {
 
     console.log("✅ Checkout created:", transaction.id);
 
+    const frontendUrl = process.env.FRONTEND_URL || "https://cookandeathealthy.com";
+    const ptxn = new URL(checkoutUrl).searchParams.get("_ptxn");
+    const frontendCheckoutUrl = ptxn
+      ? `${frontendUrl}/checkout?_ptxn=${ptxn}`
+      : `${frontendUrl}/checkout`;
+
     res.json({
       success: true,
-      checkout_url: checkoutUrl,
+      checkout_url: frontendCheckoutUrl,
+      paddle_checkout_url: checkoutUrl,
       transaction_id: transaction.id,
     });
   } catch (error) {
