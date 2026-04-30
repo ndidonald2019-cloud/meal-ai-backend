@@ -328,10 +328,45 @@ app.post("/cookWithIngredients", async (req, res) => {
     return res.status(400).json({ error: "ingredients required" });
 
   try {
-    const prompt = `You are a professional chef. Suggest 10 meals using these ingredients: ${ingredients.join(
-      ", "
-    )}. The style should match ${country || "global"
-      } cuisine. Return ONLY valid JSON with this structure: { "recipes": [{ "title": "", "description": "", "matchPercentage": 90, "missedIngredients": [], "usedIngredients": [], "cookTime": "", "difficulty": "" }] }`;
+    const prompt = `You are a culinary expert 
+specializing in ${country || "global"} cuisine.
+
+The user is from: ${country || "anywhere in the world"}
+
+They have these ingredients available:
+${ingredients.join(", ")}
+
+STRICT RULE: You MUST suggest ONLY meals that are 
+traditionally prepared and commonly eaten in 
+${country || "their country"}.
+Do NOT suggest meals from other countries.
+${country ? `Every suggested meal must be an authentic ${country} dish.` : ""}
+
+Think about what local home cooks in 
+${country || "this region"} would actually 
+make with these ingredients.
+
+Return ONLY valid JSON with no extra text:
+{
+  "recipes": [
+    {
+      "title": "Local meal name from ${country || "their country"}",
+      "description": "One sentence about this local dish",
+      "matchPercentage": 85,
+      "usedIngredients": ["ingredient1", "ingredient2"],
+      "missedIngredients": ["missing ingredient"],
+      "cookTime": "30 minutes",
+      "difficulty": "Easy",
+      "country": "${country || "International"}",
+      "why_local": "Why this is a traditional dish here"
+    }
+  ]
+}
+
+Suggest exactly 3 meals.
+ALL 3 meals must be authentic traditional dishes 
+from ${country || "the user's country"}.
+Never suggest meals from other countries.`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -376,7 +411,87 @@ app.post("/generateWeeklyPlan", async (req, res) => {
   const { goal, country, diet_type, skill_level } = req.body;
 
   try {
-    const prompt = `Generate a 7-day meal plan for someone with goal: ${goal || "healthy eating"}, from ${country || "anywhere"}, diet: ${diet_type || "no restrictions"}, skill level: ${skill_level || "beginner"}. Return ONLY valid JSON: { "plan": { "Monday": { "breakfast": "", "lunch": "", "dinner": "", "snack": "" }, "Tuesday": { "breakfast": "", "lunch": "", "dinner": "", "snack": "" }, "Wednesday": { "breakfast": "", "lunch": "", "dinner": "", "snack": "" }, "Thursday": { "breakfast": "", "lunch": "", "dinner": "", "snack": "" }, "Friday": { "breakfast": "", "lunch": "", "dinner": "", "snack": "" }, "Saturday": { "breakfast": "", "lunch": "", "dinner": "", "snack": "" }, "Sunday": { "breakfast": "", "lunch": "", "dinner": "", "snack": "" } }, "shopping_list": { "proteins": [], "vegetables": [], "grains": [], "fruits": [], "condiments": [] }, "cooking_tips": [] }`;
+    const prompt = `You are a professional nutritionist 
+and culinary expert specializing in 
+${country || "global"} cuisine.
+
+Create a 7-day meal plan for someone:
+From: ${country || "anywhere"}
+Goal: ${goal || "healthy eating"}
+Diet: ${diet_type || "no restrictions"}
+Skill level: ${skill_level || "beginner"}
+Cooking for: ${req.body.people_count || 1} person(s)
+
+STRICT RULE: ALL meals in this plan MUST be 
+traditional dishes from ${country || "their country"}.
+Use locally available ingredients from 
+${country || "their region"}.
+Every meal name must be recognizable to someone 
+living in ${country || "their country"}.
+${country ? `Every single meal must be an authentic ${country} dish.` : ""}
+
+Return ONLY valid JSON with no extra text:
+{
+  "plan": {
+    "Monday": {
+      "breakfast": "Local breakfast dish from ${country || "their country"}",
+      "lunch": "Local lunch dish from ${country || "their country"}",
+      "dinner": "Local dinner dish from ${country || "their country"}",
+      "snack": "Local snack from ${country || "their country"}"
+    },
+    "Tuesday": {
+      "breakfast": "Local breakfast dish",
+      "lunch": "Local lunch dish",
+      "dinner": "Local dinner dish",
+      "snack": "Local snack"
+    },
+    "Wednesday": {
+      "breakfast": "Local breakfast dish",
+      "lunch": "Local lunch dish",
+      "dinner": "Local dinner dish",
+      "snack": "Local snack"
+    },
+    "Thursday": {
+      "breakfast": "Local breakfast dish",
+      "lunch": "Local lunch dish",
+      "dinner": "Local dinner dish",
+      "snack": "Local snack"
+    },
+    "Friday": {
+      "breakfast": "Local breakfast dish",
+      "lunch": "Local lunch dish",
+      "dinner": "Local dinner dish",
+      "snack": "Local snack"
+    },
+    "Saturday": {
+      "breakfast": "Local breakfast dish",
+      "lunch": "Local lunch dish",
+      "dinner": "Local dinner dish",
+      "snack": "Local snack"
+    },
+    "Sunday": {
+      "breakfast": "Local breakfast dish",
+      "lunch": "Local lunch dish",
+      "dinner": "Local dinner dish",
+      "snack": "Local snack"
+    }
+  },
+  "shopping_list": {
+    "proteins": ["local protein 1", "local protein 2"],
+    "vegetables": ["local vegetable 1", "local vegetable 2"],
+    "grains": ["local grain 1", "local grain 2"],
+    "fruits": ["local fruit 1", "local fruit 2"],
+    "condiments": ["local spice 1", "local spice 2"]
+  },
+  "cooking_tips": [
+    "Practical cooking tip for ${country || "this region"}",
+    "Another useful local cooking tip"
+  ]
+}
+
+ALL 28 meals in the plan must be authentic 
+traditional dishes from ${country || "the user's country"}.
+Never include meals from other countries.`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -428,7 +543,55 @@ app.post("/rescueLeftovers", async (req, res) => {
     return res.status(400).json({ error: "leftovers required" });
 
   try {
-    const prompt = `You are a creative chef. Transform these leftovers: ${leftovers.join(", ")} into 10 new exciting meals. Style: ${country || "global"}. Return ONLY valid JSON: { "recipes": [{ "title": "", "description": "", "transformation_steps": [], "extra_ingredients": [], "cook_time": "", "wow_factor": "" }] }`;
+    const prompt = `You are a culinary expert 
+specializing in ${country || "global"} cuisine.
+
+The user is from: ${country || "anywhere in the world"}
+
+They have these leftover ingredients: 
+${leftovers.join(", ")}
+
+STRICT RULE: You MUST suggest ONLY meals that are 
+traditionally prepared and eaten in ${country || "their country"}.
+Do NOT suggest meals from other countries.
+${country ? `Only suggest authentic ${country} dishes.` : ""}
+
+For example:
+- If country is Cameroon suggest Ndole, Eru, Mbanga soup, Poulet DG
+- If country is Nigeria suggest Egusi, Jollof Rice, Pepper soup, Afang
+- If country is Ghana suggest Fufu, Waakye, Banku, Kelewele
+- If country is Italy suggest Pasta, Risotto, Pizza, Gnocchi
+- If country is Japan suggest Ramen, Sushi, Miso soup, Onigiri
+- If country is India suggest Biryani, Dal, Curry, Chapati
+- If country is France suggest Ratatouille, Crepes, Quiche, Cassoulet
+- If country is Mexico suggest Tacos, Enchiladas, Tamales, Pozole
+
+Return ONLY valid JSON with no extra text:
+{
+  "recipes": [
+    {
+      "title": "Authentic meal name from ${country || "their country"}",
+      "description": "Brief description of this local dish",
+      "transformation_steps": [
+        "Step 1 instruction",
+        "Step 2 instruction",
+        "Step 3 instruction"
+      ],
+      "extra_ingredients": [
+        "additional ingredient needed"
+      ],
+      "cook_time": "30 minutes",
+      "wow_factor": "Why this local dish is special",
+      "country": "${country || "International"}",
+      "is_local_dish": true
+    }
+  ]
+}
+
+Suggest exactly 3 meals.
+ALL 3 meals must be traditional dishes 
+from ${country || "the user's country"}.
+Never suggest meals from other countries.`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
@@ -588,7 +751,52 @@ app.post("/budgetMeals", async (req, res) => {
     return res.status(400).json({ error: "budget required" });
 
   try {
-    const prompt = `You are a budget cooking expert. Find 6 delicious meals under ${budget} ${currency || "USD"} for ${people_count || 1} person in ${country || "anywhere"}. Return ONLY valid JSON: { "budget_summary": { "budget": "", "per_person": "", "verdict": "" }, "meals": [{ "name": "", "cuisine": "", "estimated_cost": "", "servings": 2, "cost_per_person": "", "prep_time": "", "difficulty": "", "why_affordable": "", "money_saving_tip": "" }], "general_tips": [] }`;
+    const prompt = `You are a budget cooking expert 
+who knows local food prices and markets in 
+${country || "countries around the world"}.
+
+The user is from: ${country || "anywhere"}
+Their budget: ${budget} ${currency || "USD"}
+Number of people: ${people_count || 1}
+
+STRICT RULE: Suggest ONLY meals that are 
+traditionally eaten in ${country || "their country"}.
+Consider actual local market prices in 
+${country || "their region"}.
+Use ingredients that are easily found in 
+local markets in ${country || "their area"}.
+${country ? `Every single meal must be an authentic ${country} dish.` : ""}
+
+Return ONLY valid JSON with no extra text:
+{
+  "budget_summary": {
+    "budget": "${budget} ${currency || "USD"}",
+    "per_person": "calculated cost per person",
+    "verdict": "good budget or tight budget assessment"
+  },
+  "meals": [
+    {
+      "name": "Local meal name",
+      "cuisine": "${country || "International"}",
+      "estimated_cost": "cost in ${currency || "USD"}",
+      "servings": 2,
+      "cost_per_person": "cost per person",
+      "prep_time": "30 minutes",
+      "difficulty": "Easy",
+      "why_affordable": "Why this is cheap in ${country || "this region"}",
+      "money_saving_tip": "Local tip to save money on this dish",
+      "local_market_tip": "Where to find ingredients in ${country || "local markets"}"
+    }
+  ],
+  "general_tips": [
+    "Local money saving cooking tip for ${country || "this region"}"
+  ]
+}
+
+Suggest exactly 5 meals.
+ALL 5 meals must be local traditional dishes 
+from ${country || "the user's country"}.
+Never suggest meals from other countries.`;
 
     const response = await axios.post(
       "https://api.openai.com/v1/chat/completions",
