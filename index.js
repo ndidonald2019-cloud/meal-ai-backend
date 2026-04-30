@@ -22,8 +22,8 @@ app.set("trust proxy", 1);
 // PADDLE SETUP
 // ═══════════════════════════════════════════
 const paddle = new Paddle(process.env.PADDLE_API_KEY, {
-  environment: Environment.sandbox,
-  // Using Sandbox for testing
+  environment: Environment.production,
+  // Live production mode
 });
 
 // ═══════════════════════════════════════════
@@ -221,10 +221,9 @@ app.get("/checkout", (req, res) => {
         <p>Please wait while we secure your session...</p>
         
         <script>
-          // Initialize Paddle for Sandbox
-          Paddle.Environment.set('sandbox');
+          // Initialize Paddle for Live Production
           Paddle.Initialize({
-            token: '${process.env.PADDLE_CLIENT_TOKEN}' // Ensure this is set in Railway!
+            token: '${process.env.PADDLE_CLIENT_TOKEN}'
           });
           // Paddle.js will automatically detect the ?_ptxn parameter in the URL
           // and open the checkout overlay instantly!
