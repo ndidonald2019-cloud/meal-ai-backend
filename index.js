@@ -884,28 +884,50 @@ app.post("/createCheckout", requireAuth, async (req, res) => {
   await db.createUser(user_id, email);
 
   try {
-    const transaction = await paddle.transactions.create({
-      items: [
-        {
-          priceId: selectedPackage.paddle_price_id,
-          quantity: 1,
-        },
-      ],
+    // ── Step 1: Find or create a Paddle Customer to get a real customerId ──
+    // Live mode does NOT accept customerEmail — it requires a proper customerId.
+    let customerId = null;
+    try {
+      const customerList = await paddle.customers.list({ search: email });
+      const match = (customerList.data || []).find(
+        (c) => c.email === email && c.status === "active"
+      );
+      if (match) {
+        customerId = match.id;
+        console.log("Found existing Paddle customer:", customerId);
+      } else {
+        const newCustomer = await paddle.customers.create({ email });
+        customerId = newCustomer.id;
+        console.log("Created new Paddle customer:", customerId);
+      }
+    } catch (customerErr) {
+      console.warn("Customer lookup failed, falling back to inline:", customerErr.message);
+    }
+
+    // ── Step 2: Build transaction payload ──
+    const transactionPayload = {
+      items: [{ priceId: selectedPackage.paddle_price_id, quantity: 1 }],
       customData: {
         user_id: user_id,
         package_id: package_id,
         credits: selectedPackage.credits.toString(),
       },
-      customerEmail: email,
       successUrl: `https://cookandeathealthy.com/payment-success?package=${package_id}&user=${user_id}`,
-    });
+    };
 
+    if (customerId) {
+      transactionPayload.customerId = customerId;
+    } else {
+      transactionPayload.customer = { email };
+    }
+
+    // ── Step 3: Create the transaction ──
+    const transaction = await paddle.transactions.create(transactionPayload);
     console.log("Paddle transaction created:", transaction.id);
 
     const checkoutUrl = transaction.checkout?.url;
-
     if (!checkoutUrl) {
-      console.error("No checkout URL from Paddle:", transaction);
+      console.error("No checkout URL from Paddle:", JSON.stringify(transaction, null, 2));
       return res.status(500).json({
         error: "Paddle did not return a checkout URL",
         transaction_id: transaction.id,
@@ -923,18 +945,25 @@ app.post("/createCheckout", requireAuth, async (req, res) => {
       status: "pending",
     });
 
-    console.log("✅ Checkout created:", transaction.id);
-
+    console.log("Checkout created:", transaction.id);
     res.json({
       success: true,
       checkout_url: checkoutUrl,
       transaction_id: transaction.id,
     });
   } catch (error) {
+    // Expose the real Paddle error so it is visible in the app (not just logs)
+    const paddleDetail =
+      error?.error?.detail ||
+      error?.error?.code ||
+      error?.errors ||
+      error?.detail ||
+      error.message;
     console.error("Paddle checkout error:", error.message);
-    console.error("Full error:", JSON.stringify(error, null, 2));
+    console.error("Paddle error detail:", JSON.stringify(error?.error || error, null, 2));
     res.status(500).json({
-      error: "Server error"
+      error: "Payment setup failed",
+      paddle_error: paddleDetail,
     });
   }
 });
