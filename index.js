@@ -363,8 +363,8 @@ Return ONLY valid JSON with no extra text:
   ]
 }
 
-Suggest exactly 3 meals.
-ALL 3 meals must be authentic traditional dishes 
+Suggest exactly 10 meals.
+ALL 10 meals must be authentic traditional dishes 
 from ${country || "the user's country"}.
 Never suggest meals from other countries.`;
 
@@ -588,8 +588,8 @@ Return ONLY valid JSON with no extra text:
   ]
 }
 
-Suggest exactly 3 meals.
-ALL 3 meals must be traditional dishes 
+Suggest exactly 10 meals.
+ALL 10 meals must be traditional dishes 
 from ${country || "the user's country"}.
 Never suggest meals from other countries.`;
 
@@ -793,8 +793,8 @@ Return ONLY valid JSON with no extra text:
   ]
 }
 
-Suggest exactly 5 meals.
-ALL 5 meals must be local traditional dishes 
+Suggest exactly 8 meals.
+ALL 8 meals must be local traditional dishes 
 from ${country || "the user's country"}.
 Never suggest meals from other countries.`;
 
