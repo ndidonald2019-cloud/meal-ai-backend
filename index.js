@@ -30,7 +30,7 @@ const paddle = new Paddle(process.env.PADDLE_API_KEY, {
 // RESEND EMAIL SETUP
 // ═══════════════════════════════════════════
 const { Resend } = require('resend');
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY || 're_dummykey1234567890');
 
 // ═══════════════════════════════════════════
 // EMAIL HELPER FUNCTIONS
@@ -198,8 +198,8 @@ async function sendCreditPurchaseEmail(email, name, credits, amount, newBalance)
     await resend.emails.send({
       from: 'CookAndEatHealthy <noreply@cookandeathealthy.com>',
       to: email,
-      subject: \`✅ \${credits} Credits Added to Your Account\`,
-      html: \`
+      subject: `✅ ${credits} Credits Added to Your Account`,
+      html: `
         <!DOCTYPE html>
         <html>
         <head>
@@ -293,26 +293,26 @@ async function sendCreditPurchaseEmail(email, name, credits, amount, newBalance)
                 Payment Successful!
               </div>
               <div class="credits-added">
-                +\${credits} Credits Added
+                +${credits} Credits Added
               </div>
             </div>
             <div class="details-box">
               <div class="detail-row">
                 <span>Credits purchased</span>
-                <span class="detail-value">\${credits} 🪙</span>
+                <span class="detail-value">${credits} 🪙</span>
               </div>
               <div class="detail-row">
                 <span>Amount paid</span>
-                <span class="detail-value">$\${amount}</span>
+                <span class="detail-value">$${amount}</span>
               </div>
               <div class="detail-row">
                 <span>New balance</span>
-                <span class="detail-value">\${newBalance} 🪙</span>
+                <span class="detail-value">${newBalance} 🪙</span>
               </div>
               <div class="detail-row">
                 <span>Date</span>
                 <span class="detail-value">
-                  \${new Date().toLocaleDateString()}
+                  ${new Date().toLocaleDateString()}
                 </span>
               </div>
             </div>
@@ -327,7 +327,7 @@ async function sendCreditPurchaseEmail(email, name, credits, amount, newBalance)
           </div>
         </body>
         </html>
-      \`
+      `
     });
     console.log('✅ Purchase email sent to:', email);
     return true;
@@ -343,7 +343,7 @@ async function sendLowBalanceEmail(email, name, credits) {
       from: 'CookAndEatHealthy <noreply@cookandeathealthy.com>',
       to: email,
       subject: '⚠️ You are running low on credits',
-      html: \`
+      html: `
         <!DOCTYPE html>
         <html>
         <head>
@@ -449,11 +449,11 @@ async function sendLowBalanceEmail(email, name, credits) {
                 Running Low on Credits
               </div>
               <div class="credits-left">
-                \${credits} credits left
+                ${credits} credits left
               </div>
             </div>
             <p class="text">
-              Hey \${name || 'Chef'}, you are almost out 
+              Hey ${name || 'Chef'}, you are almost out 
               of credits. Top up now to keep enjoying 
               AI-powered cooking features.
             </p>
@@ -489,7 +489,7 @@ async function sendLowBalanceEmail(email, name, credits) {
           </div>
         </body>
         </html>
-      \`
+      `
     });
     console.log('✅ Low balance email sent to:', email);
     return true;
