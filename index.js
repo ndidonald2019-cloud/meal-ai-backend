@@ -944,7 +944,14 @@ app.post("/createCheckout", requireAuth, async (req, res) => {
         console.log("Created new Paddle customer:", customerId);
       }
     } catch (customerErr) {
-      console.warn("Customer lookup failed, falling back to inline:", customerErr.message);
+      // If create() failed because email already exists, extract existing ctm_ ID from error
+      const conflictIdMatch = customerErr.message?.match(/ctm_[a-z0-9]+/);
+      if (conflictIdMatch) {
+        customerId = conflictIdMatch[0];
+        console.log("Using existing Paddle customer from conflict:", customerId);
+      } else {
+        console.warn("Customer lookup failed:", customerErr.message);
+      }
     }
 
     // ── Step 2: Build transaction payload ──
