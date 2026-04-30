@@ -853,6 +853,49 @@ app.get("/creditPackages", (req, res) => {
 });
 
 // ═══════════════════════════════════════════
+// 🔍 PADDLE DIAGNOSTIC TEST (TEMPORARY)
+// ═══════════════════════════════════════════
+app.get("/paddleTest", async (req, res) => {
+  const results = {};
+
+  // 1. Check env vars are set
+  results.env = {
+    PADDLE_API_KEY: process.env.PADDLE_API_KEY
+      ? `SET (starts with: ${process.env.PADDLE_API_KEY.substring(0, 8)}...)`
+      : "MISSING",
+    PADDLE_CLIENT_TOKEN: process.env.PADDLE_CLIENT_TOKEN
+      ? `SET (starts with: ${process.env.PADDLE_CLIENT_TOKEN.substring(0, 8)}...)`
+      : "MISSING",
+    PADDLE_STARTER_PRICE_ID: process.env.PADDLE_STARTER_PRICE_ID || "MISSING",
+    PADDLE_POPULAR_PRICE_ID: process.env.PADDLE_POPULAR_PRICE_ID || "MISSING",
+    PADDLE_PRO_PRICE_ID: process.env.PADDLE_PRO_PRICE_ID || "MISSING",
+  };
+
+  // 2. Test Paddle API — try listing customers
+  try {
+    const customers = await paddle.customers.list({ perPage: 1 });
+    results.paddle_api = {
+      status: "OK",
+      message: "Paddle API key is valid and working",
+      environment: "production",
+    };
+  } catch (err) {
+    results.paddle_api = {
+      status: "FAILED",
+      error: err.message,
+      detail: err?.error || err?.errors || null,
+      hint: err.message?.includes("401") || err.message?.includes("unauthorized")
+        ? "API key is wrong or still a sandbox key"
+        : err.message?.includes("sandbox")
+        ? "You are using a sandbox API key in production mode"
+        : "Check Railway env vars",
+    };
+  }
+
+  res.json(results);
+});
+
+// ═══════════════════════════════════════════
 // ✅ CREATE PADDLE CHECKOUT
 // ═══════════════════════════════════════════
 app.post("/createCheckout", requireAuth, async (req, res) => {
